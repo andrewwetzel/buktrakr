@@ -12,6 +12,11 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
 /** The stored refresh token was revoked or expired; user must reconnect. */
 export class ReconnectRequiredError extends Error {}
 
+// Secrets pasted into the dashboard often pick up a stray newline or space;
+// Google then rejects the client as unknown (invalid_client).
+const clientId = (env: Env): string => env.GOOGLE_CLIENT_ID.trim();
+const clientSecret = (env: Env): string => env.GOOGLE_CLIENT_SECRET.trim();
+
 export interface IdClaims {
   sub: string;
   email: string | null;
@@ -24,7 +29,7 @@ export function buildAuthUrl(
   forceConsent: boolean
 ): string {
   const params = new URLSearchParams({
-    client_id: env.GOOGLE_CLIENT_ID,
+    client_id: clientId(env),
     redirect_uri: redirectUri,
     response_type: "code",
     scope: SCOPES,
@@ -83,8 +88,8 @@ export async function exchangeCode(
 ): Promise<{ refreshToken: string | null; claims: IdClaims | null }> {
   const { status, body } = await tokenRequest({
     code,
-    client_id: env.GOOGLE_CLIENT_ID,
-    client_secret: env.GOOGLE_CLIENT_SECRET,
+    client_id: clientId(env),
+    client_secret: clientSecret(env),
     redirect_uri: redirectUri,
     grant_type: "authorization_code",
   });
@@ -100,8 +105,8 @@ export async function exchangeCode(
 export async function refreshAccessToken(env: Env, refreshToken: string): Promise<string> {
   const { status, body } = await tokenRequest({
     refresh_token: refreshToken,
-    client_id: env.GOOGLE_CLIENT_ID,
-    client_secret: env.GOOGLE_CLIENT_SECRET,
+    client_id: clientId(env),
+    client_secret: clientSecret(env),
     grant_type: "refresh_token",
   });
   if (status === 400 && body.error === "invalid_grant") {

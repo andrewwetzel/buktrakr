@@ -95,6 +95,16 @@ export default {
         }
 
         case "GET /auth/google": {
+          const missing = (["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_SECRET"] as const)
+            .filter((k) => !env[k] || !env[k].trim());
+          if (missing.length > 0) {
+            return new Response(
+              `Server misconfigured: the ${missing.join(", ")} secret${missing.length > 1 ? "s are" : " is"} not set.\n` +
+                `Add ${missing.length > 1 ? "them" : "it"} in the Cloudflare dashboard under ` +
+                `your Worker -> Settings -> Variables and Secrets (type: Secret).`,
+              { status: 500, headers: { "Content-Type": "text/plain" } }
+            );
+          }
           const state = crypto.randomUUID();
           const forceConsent = url.searchParams.get("consent") === "1";
           return redirect(
