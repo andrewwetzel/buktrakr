@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BukTrakr</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --card: #ffffff;
+      --ink: #2b2620;
+      --muted: #7a7266;
+      --accent: #3b6e4f;
+      --accent-ink: #ffffff;
+      --line: #e4dfd5;
+      --danger: #a04030;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1d1b17;
+        --card: #26231e;
+        --ink: #ece7dd;
+        --muted: #a29a8c;
+        --accent: #6fae8a;
+        --accent-ink: #14211a;
+        --line: #3a352d;
+        --danger: #e08874;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+    main { width: 100%; max-width: 34rem; }
+    h1 { font-size: 1.7rem; margin: 0 0 0.25rem; }
+    .tagline { color: var(--muted); margin: 0 0 1.5rem; font-style: italic; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    #status { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+    #status .who { color: var(--muted); font-size: 0.9rem; }
+    a { color: var(--accent); }
+    label { display: block; font-weight: bold; margin: 0.9rem 0 0.3rem; font-size: 0.95rem; }
+    label:first-child { margin-top: 0; }
+    input, select, textarea {
+      width: 100%;
+      font: inherit;
+      color: inherit;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.55rem 0.65rem;
+    }
+    textarea { min-height: 6rem; resize: vertical; }
+    button {
+      font: inherit;
+      border: none;
+      border-radius: 6px;
+      padding: 0.6rem 1.1rem;
+      cursor: pointer;
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+    button.subtle {
+      background: none;
+      color: var(--muted);
+      text-decoration: underline;
+      padding: 0.25rem;
+    }
+    .actions { margin-top: 1.2rem; display: flex; align-items: center; gap: 1rem; }
+    #message { margin-top: 0.9rem; font-size: 0.95rem; }
+    #message.error { color: var(--danger); }
+    #message.ok { color: var(--accent); }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BukTrakr</h1>
+    <p class="tagline">What did you just read?</p>
+
+    <div class="card" id="status">
+      <span class="who" id="who">Loading…</span>
+      <span id="connect-area" class="hidden">
+        <button id="connect">Connect Google account</button>
+      </span>
+      <span id="connected-area" class="hidden">
+        <a id="doc-link" target="_blank" rel="noopener" class="hidden">Open reviews doc</a>
+        <button class="subtle" id="disconnect">Disconnect Google</button>
+      </span>
+    </div>
+
+    <form class="card hidden" id="entry-form">
+      <label for="title">Book title</label>
+      <input id="title" name="title" required maxlength="500" autocomplete="off">
+
+      <label for="author">Author</label>
+      <input id="author" name="author" required maxlength="500" autocomplete="off">
+
+      <label for="rating">Rating</label>
+      <select id="rating" name="rating" required>
+        <option value="" selected disabled>Out of 10…</option>
+      </select>
+
+      <label for="liked">What I liked</label>
+      <textarea id="liked" name="liked" maxlength="5000"></textarea>
+
+      <label for="disliked">What I didn't like</label>
+      <textarea id="disliked" name="disliked" maxlength="5000"></textarea>
+
+      <div class="actions">
+        <button type="submit" id="submit">Add to my doc</button>
+      </div>
+      <div id="message"></div>
+    </form>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const show = (el, on) => el.classList.toggle("hidden", !on);
+
+    for (let i = 10; i >= 1; i--) {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `${i} / 10`;
+      $("rating").append(opt);
+    }
+
+    function setMessage(text, kind) {
+      const el = $("message");
+      el.textContent = text;
+      el.className = kind || "";
+    }
+
+    function showDisconnected() {
+      show($("connect-area"), true);
+      show($("connected-area"), false);
+      show($("entry-form"), false);
+    }
+
+    async function loadStatus() {
+      const res = await fetch("/api/status");
+      if (!res.ok) {
+        $("who").textContent = "Not signed in — reload to authenticate.";
+        return;
+      }
+      const s = await res.json();
+      $("who").textContent = s.email;
+      if (s.connected) {
+        show($("connect-area"), false);
+        show($("connected-area"), true);
+        show($("entry-form"), true);
+        if (s.docUrl) {
+          $("doc-link").href = s.docUrl;
+          show($("doc-link"), true);
+        }
+      } else {
+        showDisconnected();
+      }
+    }
+
+    $("connect").addEventListener("click", () => {
+      window.location.href = "/auth/google";
+    });
+
+    $("disconnect").addEventListener("click", async () => {
+      await fetch("/api/disconnect", { method: "POST" });
+      showDisconnected();
+    });
+
+    $("entry-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      setMessage("Saving…");
+      $("submit").disabled = true;
+      try {
+        const res = await fetch("/api/entries", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: $("title").value,
+            author: $("author").value,
+            rating: Number($("rating").value),
+            liked: $("liked").value,
+            disliked: $("disliked").value,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) {
+          $("entry-form").reset();
+          if (body.docUrl) {
+            $("doc-link").href = body.docUrl;
+            show($("doc-link"), true);
+          }
+          setMessage("Saved to your doc ✓", "ok");
+        } else if (res.status === 409) {
+          setMessage("Your Google connection expired — please reconnect.", "error");
+          showDisconnected();
+        } else {
+          setMessage("Something went wrong saving that entry.", "error");
+        }
+      } catch {
+        setMessage("Network error — try again.", "error");
+      } finally {
+        $("submit").disabled = false;
+      }
+    });
+
+    const err = new URLSearchParams(location.search).get("error");
+    if (err) setMessage("Google sign-in didn't complete — try connecting again.", "error");
+
+    loadStatus();
+  </script>
+</body>
+</html>
