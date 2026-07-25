@@ -4,10 +4,5 @@
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
 
-# Local-only auth bypass: used ONLY when the Cf-Access-Jwt-Assertion header is
-# absent. Never set this as a production var/secret.
-DEV_USER_EMAIL=you@example.com
-
-# Overrides the APP_URL var from wrangler.jsonc so the Google OAuth redirect
-# points back at wrangler dev.
-APP_URL=http://localhost:8787
+# Signs session cookies. Any long random string, e.g. `openssl rand -base64 32`.
+SESSION_SECRET=local-dev-secret-change-me

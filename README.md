@@ -1,147 +1,108 @@
 # BukTrakr
 
-A tiny private web app for logging book reviews. You sign in through a
-Cloudflare Access policy, fill in a form (title, author, rating out of 10, what
-you liked / didn't like), and each entry is appended to a Google Doc **in your
-own Google Drive**. Every person allowed by the Access policy connects their own
-Google account once; after that their reviews land in their own doc
-("BukTrakr — Book Reviews"), which the app creates for them.
+A tiny web app for logging book reviews. Sign in with Google, fill in a form
+(title, author, rating out of 10, what you liked / didn't like), and each
+entry is appended to a Google Doc **in your own Google Drive** — the app
+creates a "BukTrakr — Book Reviews" doc for you on your first entry and only
+ever touches that one doc.
 
-Deployment is fully dashboard-driven: Cloudflare's git integration builds and
-deploys the Worker from the `main` branch of this repo on every push — no local
-clone, wrangler, or build step required.
+Anyone can use a hosted instance: Google sign-in *is* the login, and every
+user's reviews go to their own doc in their own Drive.
+
+## Deploy your own
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/andrewwetzel/buktrakr)
+
+The button clones this repo into your GitHub account, provisions the KV
+namespace in your Cloudflare account, and sets up continuous deploys from
+`main`. Two things it can't do for you — a Google OAuth client and three
+secrets — are covered below.
+
+### 1. Google Cloud (console.cloud.google.com)
+
+1. Create a project (e.g. `buktrakr`).
+2. **APIs & Services → Library**: enable **Google Drive API** and
+   **Google Docs API**.
+3. **OAuth consent screen**: user type **External**, add the scopes
+   `openid`, `.../auth/userinfo.email`, and
+   `https://www.googleapis.com/auth/drive.file`.
+4. **Publish the consent screen to Production**. All three scopes are
+   non-sensitive, so no Google verification review is needed — and Testing
+   mode's 7-day refresh-token expiry is avoided.
+5. **Credentials → Create credentials → OAuth client ID**, type
+   **Web application**. Authorized redirect URI:
+   `https://YOUR-HOSTNAME/auth/callback` — that's your
+   `<name>.<subdomain>.workers.dev` host, or your custom domain if you add
+   one (you can list several, including `http://localhost:8787/auth/callback`
+   for local dev). Note the client ID and secret.
+
+### 2. Cloudflare
+
+1. If you didn't use the button: create a KV namespace (**Storage &
+   Databases → KV**) and paste its ID into `wrangler.jsonc`
+   (`kv_namespaces[0].id`), then connect the repo via **Workers & Pages →
+   Create → Workers → Import a repository**. Every push to `main`
+   auto-deploys.
+2. Your Worker → **Settings → Variables and Secrets** — add three
+   **secrets**:
+   - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from step 1.5
+   - `SESSION_SECRET` — any long random string (e.g. `openssl rand -base64 32`);
+     it signs the session cookies
+3. Optional: **Settings → Domains & Routes → Add → Custom domain** to serve
+   it from your own hostname (then add that hostname's callback URL to the
+   Google OAuth client too).
+
+That's the whole setup. Visit the app, sign in with Google, log a book.
 
 ## How it works
 
-- A single **Cloudflare Worker** (no runtime npm dependencies) serves the form
-  (`public/index.html`) and the API.
-- **Cloudflare Access** gates the hostname. The Worker additionally verifies the
-  `Cf-Access-Jwt-Assertion` JWT (signature via the team JWKS, plus `iss`/`aud`/
-  `exp` claims) so the app can't be reached without a valid Access session —
-  `workers_dev` is disabled for the same reason. The JWT's `email` claim is the
-  user's identity.
-- Each user does a one-time **Google OAuth** connect with only the
-  `drive.file` scope — the app can touch *only files it created*, nothing else
-  in their Drive. Because that scope is non-sensitive, the OAuth consent screen
-  can be published to production without Google's verification review.
-- **Workers KV** stores, per user email: the Google refresh token and the doc
-  ID. On each submission the Worker mints a fresh access token, ensures the doc
-  exists (recreating it if the user deleted it), and appends a formatted entry
-  via the Google Docs API.
-
-Note: refresh tokens are stored unencrypted in KV. For a personal tool behind
-Access with the minimal `drive.file` scope this is an accepted trade-off.
-
-## One-time setup
-
-### 1. Google Cloud (done once for the whole app)
-
-1. Create a project at https://console.cloud.google.com (e.g. `buktrakr`).
-2. **APIs & Services → Library**: enable **Google Drive API** and
-   **Google Docs API**.
-3. **OAuth consent screen** (Google Auth Platform): user type **External**, app
-   name "BukTrakr", your support email. Add the scope
-   `https://www.googleapis.com/auth/drive.file`.
-4. **Publish the app to Production** (Publishing status → "In production").
-   No verification is needed for `drive.file`, and this avoids Testing mode's
-   7-day refresh-token expiry.
-5. **Credentials → Create credentials → OAuth client ID**, type
-   **Web application**. Authorized redirect URI:
-   `https://YOUR-DOMAIN/auth/callback`
-   (add `http://localhost:8787/auth/callback` too only if you ever want to run
-   the app locally). Note the client ID and client secret.
-
-### 2. Cloudflare — everything from the dashboard
-
-1. **KV namespace**: dash.cloudflare.com → **Storage & Databases → KV →
-   Create namespace** (name it e.g. `buktrakr`). Copy its **namespace ID** and
-   put it into `wrangler.jsonc` (`kv_namespaces[0].id`). No clone needed —
-   edit the file straight on GitHub (open `wrangler.jsonc` → pencil icon →
-   commit to `main`), or ask Claude to commit it for you. Do this **before**
-   step 2 so the first deploy succeeds.
-2. **Connect the repo**: **Workers & Pages → Create → Workers → Import a
-   repository** → connect your GitHub account → pick `andrewwetzel/buktrakr`,
-   branch `main`. The defaults are fine — Cloudflare runs
-   `npx wrangler deploy`, which reads `wrangler.jsonc` from the repo root.
-   From now on **every push to `main` auto-deploys**.
-3. **Variables and secrets**: your Worker → **Settings → Variables and
-   Secrets**. Add:
-   - **Secret** `GOOGLE_CLIENT_ID` — from Google step 5
-   - **Secret** `GOOGLE_CLIENT_SECRET` — from Google step 5
-   - **Text** `APP_URL` — `https://YOUR-DOMAIN` (no trailing slash)
-   - **Text** `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` — filled in step 5;
-     you can create them with placeholder values for now.
-
-   These live only in the dashboard (`keep_vars` in `wrangler.jsonc` stops
-   deploys from overwriting them), so you can edit them any time without
-   touching the repo.
-4. **Custom domain**: your Worker → **Settings → Domains & Routes → Add →
-   Custom domain** → `books.yourdomain.com` (any hostname on a zone in your
-   account). Cloudflare creates the DNS record and certificate automatically.
-5. **Zero Trust Access**: one.dash.cloudflare.com → **Access →
-   Applications → Add an application → Self-hosted**:
-   - Application domain = the hostname from step 4; session duration to taste
-     (e.g. 1 week).
-   - Add an **Allow** policy including the emails (or email domain) of
-     everyone who may use the app. The default One-Time PIN login works out of
-     the box; add Google SSO as an identity provider if you prefer.
-   - Do **not** add a bypass for `/auth/callback` — the browser carries the
-     Access cookie through Google's redirect, so it passes through normally.
-6. Back in the Worker's **Variables and Secrets**, set the real values:
-   - `ACCESS_AUD` = the Access application's **AUD tag** (application →
-     Overview / Basic information).
-   - `ACCESS_TEAM_DOMAIN` = your team domain, e.g.
-     `yourteam.cloudflareaccess.com` (Zero Trust → Settings → Custom Pages).
-
-   Saving variables redeploys the Worker immediately — no push needed.
-
-That's it. Visit the hostname, pass the Access login, click **Connect Google
-account**, and start logging books. Each new user covered by the policy repeats
-only the connect step.
-
-## Making changes
-
-Push (or merge) to `main` and Cloudflare rebuilds and deploys automatically.
-Build history and logs are under the Worker's **Deployments** tab.
-
-## Local development (optional)
-
-Not required for deployment, but the app runs fully locally if you ever want
-it to:
-
-```sh
-cp .dev.vars.example .dev.vars   # fill in Google client ID/secret + your email
-npm install
-npm run dev                       # http://localhost:8787
-```
-
-Access isn't in front of `wrangler dev`, so `.dev.vars` sets `DEV_USER_EMAIL`,
-which is used **only when the `Cf-Access-Jwt-Assertion` header is absent**.
-Since `DEV_USER_EMAIL` is never configured in production, the bypass cannot
-apply there. The full OAuth + Docs flow works locally against the real Google
-APIs if you registered the `http://localhost:8787/auth/callback` redirect URI.
+- A single **Cloudflare Worker** (no runtime npm dependencies) serves the
+  static form (`public/index.html`) and a small JSON API.
+- **Google sign-in is the login.** The OAuth flow requests `openid email`
+  (identity) plus `drive.file` (Drive access limited to files the app
+  created). The Worker keeps users signed in with an HMAC-signed, HttpOnly
+  session cookie (`SESSION_SECRET`); the OAuth `state` round-trips through a
+  short-lived cookie as CSRF protection.
+- **Workers KV** stores one small record per Google account (keyed by the
+  stable `sub` id): the refresh token, the doc ID, and the email. On each
+  submission the Worker mints a fresh access token, ensures the doc exists
+  (recreating it if deleted), and appends a formatted entry via the Docs API.
+- Privacy: the `drive.file` scope means the app **cannot see anything in a
+  user's Drive except the one doc it created**. Refresh tokens are stored
+  unencrypted in KV — acceptable for this scope, and noted here for
+  transparency.
 
 ## Behavior notes
 
 - **Revoked/expired Google connection** (`invalid_grant`): the API returns
-  `409 reconnect_required` and the UI shows the Connect button again. The doc
-  ID is kept, so reconnecting resumes the same doc.
+  `409 reconnect_required` and the UI shows a "Reconnect Google" button,
+  which re-runs the OAuth flow with `prompt=consent` to get a fresh refresh
+  token. The doc ID is kept, so the same doc is resumed.
 - **User deletes the doc in Drive**: the next submission gets a 404 from the
   Docs API; the Worker creates a fresh doc and retries the append once.
-- **Wrong Google account**: users may connect a Google account different from
-  their Access email — that's allowed; the doc simply lives wherever they
-  connected.
+- **Sign out** clears the session cookie. **Disconnect** (`/api/disconnect`)
+  additionally revokes the app's Google access.
 
-## Verifying the deployment
+## Local development
 
-1. `curl -I https://YOUR-DOMAIN/` while logged out → 302 to
-   `…cloudflareaccess.com` (Access is fronting the app).
-2. `curl https://YOUR-DOMAIN/api/status -H "Cf-Access-Jwt-Assertion: bogus"`
-   → `403` (the Worker verifies the JWT itself, it doesn't just trust the
-   header).
-3. In a browser: pass the Access login → Connect Google → submit an entry →
-   the "Open reviews doc" link shows a doc with a formatted entry (heading,
-   italic rating line, bold section labels). Submit another entry → it appends
-   below.
-4. Have a second policy-allowed user repeat step 3 — their entries land in a
-   doc in *their* Drive.
+```sh
+cp .dev.vars.example .dev.vars   # fill in Google client ID/secret
+npm install
+npm run dev                       # http://localhost:8787
+```
+
+Register `http://localhost:8787/auth/callback` as an additional redirect URI
+on the Google OAuth client and the full sign-in + Docs flow works locally
+against the real Google APIs.
+
+## Verifying a deployment
+
+1. Load the app signed out → the "Sign in with Google" card shows.
+2. Sign in → the form appears with your email in the status bar.
+3. Submit an entry → "Open reviews doc" links to a doc with a formatted
+   entry (heading, italic rating line, bold section labels). A second entry
+   appends below the first.
+4. `curl -X POST https://YOUR-HOSTNAME/api/entries -d '{}'` with no cookie
+   → `401` (the API requires a valid signed session).
+5. A second person signs in with their own Google account → their entries
+   land in a doc in *their* Drive.

@@ -4,14 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
 
-  // The app must only be reachable through the Access-protected custom domain
-  // (added in the dashboard: Settings -> Domains & Routes).
-  "workers_dev": false,
-
-  // All vars and secrets are managed in the Cloudflare dashboard
-  // (Settings -> Variables and Secrets): APP_URL, ACCESS_TEAM_DOMAIN,
-  // ACCESS_AUD as plaintext vars; GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET as
-  // secrets. keep_vars stops git-triggered deploys from wiping them.
+  // Secrets (dashboard: Settings -> Variables and Secrets, or `wrangler
+  // secret put`): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET.
+  // keep_vars stops git-triggered deploys from wiping dashboard-set values.
   "keep_vars": true,
 
   "assets": {
@@ -19,7 +14,8 @@
     "run_worker_first": ["/api/*", "/auth/*"]
   },
 
-  // Create the namespace in the dashboard (Storage & Databases -> KV) and
-  // paste its ID here — this is the one value that must live in the repo.
+  // Deploying with the "Deploy to Cloudflare" button provisions this
+  // namespace automatically. Deploying manually: create a KV namespace
+  // (dashboard -> Storage & Databases -> KV) and paste its ID here.
   "kv_namespaces": [{ "binding": "KV", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }]
 }
