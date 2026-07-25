@@ -1,5 +1,7 @@
 # BukTrakr — common commands. Run `just` to list them.
-# One-time Cloudflare/Google setup: run `just setup` (full detail in README.md).
+# Deployment is dashboard-driven (push to main auto-deploys via Cloudflare's
+# git integration); these recipes are for optional local dev. Run `just setup`
+# for the one-time setup checklist (full detail in README.md).
 
 set shell := ["bash", "-cu"]
 
@@ -18,7 +20,7 @@ dev:
 check:
     npm run typecheck
 
-# Deploy the Worker to Cloudflare
+# Deploy manually (normally unnecessary — pushing to main auto-deploys)
 deploy:
     npx wrangler deploy
 
@@ -26,45 +28,43 @@ deploy:
 logs:
     npx wrangler tail
 
-# Create the KV namespace, then paste the printed id into wrangler.jsonc
-kv-create:
-    npx wrangler kv namespace create KV
-
-# Set the Google OAuth secrets on the deployed Worker (prompts for each value)
-secrets:
-    npx wrangler secret put GOOGLE_CLIENT_ID
-    npx wrangler secret put GOOGLE_CLIENT_SECRET
-
 # Show the stored record for a user, e.g. `just kv-user you@example.com`
 kv-user email:
     npx wrangler kv key get "user:{{email}}" --binding KV --remote
 
-# Print the one-time Cloudflare + Google setup checklist
+# Print the one-time setup checklist (all done from the Cloudflare dashboard)
 setup:
     #!/usr/bin/env bash
     cat <<'EOF'
-    BukTrakr one-time setup
-    =======================
+    BukTrakr one-time setup (no local tooling needed)
+    =================================================
 
     A. Google Cloud (console.cloud.google.com) — once for the whole app
        1. Create a project (e.g. "buktrakr").
        2. APIs & Services -> Library: enable "Google Drive API" and "Google Docs API".
        3. OAuth consent screen: External, app name "BukTrakr", your email;
           add scope https://www.googleapis.com/auth/drive.file
-       4. Publish the consent screen to PRODUCTION (no Google review needed for
-          drive.file; avoids 7-day token expiry of Testing mode).
+       4. Publish the consent screen to PRODUCTION (no Google review needed
+          for drive.file; avoids 7-day token expiry of Testing mode).
        5. Credentials -> Create OAuth client ID -> Web application.
-          Authorized redirect URIs:
-            https://YOUR-DOMAIN/auth/callback
-            http://localhost:8787/auth/callback
+          Authorized redirect URI: https://YOUR-DOMAIN/auth/callback
           Note the client ID + secret.
 
-    B. Cloudflare
-       1. Edit wrangler.jsonc: set your hostname in "routes" and "APP_URL"
-          (e.g. books.yourdomain.com — the zone must be in your account).
-       2. just kv-create        # paste the printed id into wrangler.jsonc
-       3. just secrets          # paste the Google client ID + secret
-       4. just deploy           # custom_domain:true auto-creates DNS + cert
+    B. Cloudflare dashboard (dash.cloudflare.com)
+       1. Storage & Databases -> KV -> Create namespace ("buktrakr").
+          Copy the namespace ID into wrangler.jsonc (kv_namespaces[0].id) —
+          edit the file on GitHub directly and commit to main.
+       2. Workers & Pages -> Create -> Workers -> Import a repository ->
+          pick this repo, branch main. Defaults are fine. Every push to
+          main now auto-deploys.
+       3. Worker -> Settings -> Variables and Secrets:
+            Secret GOOGLE_CLIENT_ID      (from A5)
+            Secret GOOGLE_CLIENT_SECRET  (from A5)
+            Text   APP_URL               https://YOUR-DOMAIN (no trailing /)
+            Text   ACCESS_TEAM_DOMAIN    (filled in C)
+            Text   ACCESS_AUD            (filled in C)
+       4. Worker -> Settings -> Domains & Routes -> Add -> Custom domain ->
+          e.g. books.yourdomain.com (DNS + cert created automatically).
 
     C. Cloudflare Zero Trust (one.dash.cloudflare.com)
        1. Access -> Applications -> Add an application -> Self-hosted.
@@ -73,10 +73,10 @@ setup:
           everyone who may use the app. One-Time PIN login works out of the
           box; add Google SSO as an identity provider if you prefer.
           Do NOT add a bypass for /auth/callback — it isn't needed.
-       3. Copy the app's AUD tag (app -> Overview) into ACCESS_AUD in
-          wrangler.jsonc, and set ACCESS_TEAM_DOMAIN to your team domain
-          (yourteam.cloudflareaccess.com, under Zero Trust -> Settings).
-       4. just deploy           # redeploy with the Access vars filled in
+       3. Back in the Worker's Variables and Secrets, set the real values:
+          ACCESS_AUD = the Access app's AUD tag (app -> Overview);
+          ACCESS_TEAM_DOMAIN = yourteam.cloudflareaccess.com
+          (Zero Trust -> Settings). Saving redeploys immediately.
 
     Then visit your hostname, pass the Access login, click
     "Connect Google account", and log your first book.

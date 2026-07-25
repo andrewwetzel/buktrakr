@@ -7,6 +7,10 @@ own Google Drive**. Every person allowed by the Access policy connects their own
 Google account once; after that their reviews land in their own doc
 ("BukTrakr — Book Reviews"), which the app creates for them.
 
+Deployment is fully dashboard-driven: Cloudflare's git integration builds and
+deploys the Worker from the `main` branch of this repo on every push — no local
+clone, wrangler, or build step required.
+
 ## How it works
 
 - A single **Cloudflare Worker** (no runtime npm dependencies) serves the form
@@ -30,7 +34,7 @@ Access with the minimal `drive.file` scope this is an accepted trade-off.
 
 ## One-time setup
 
-### 1. Google Cloud (one project for the whole app)
+### 1. Google Cloud (done once for the whole app)
 
 1. Create a project at https://console.cloud.google.com (e.g. `buktrakr`).
 2. **APIs & Services → Library**: enable **Google Drive API** and
@@ -42,53 +46,68 @@ Access with the minimal `drive.file` scope this is an accepted trade-off.
    No verification is needed for `drive.file`, and this avoids Testing mode's
    7-day refresh-token expiry.
 5. **Credentials → Create credentials → OAuth client ID**, type
-   **Web application**. Authorized redirect URIs:
-   - `https://YOUR-DOMAIN/auth/callback`
-   - `http://localhost:8787/auth/callback` (for local dev)
+   **Web application**. Authorized redirect URI:
+   `https://YOUR-DOMAIN/auth/callback`
+   (add `http://localhost:8787/auth/callback` too only if you ever want to run
+   the app locally). Note the client ID and client secret.
 
-   Note the client ID and client secret.
+### 2. Cloudflare — everything from the dashboard
 
-### 2. Cloudflare
+1. **KV namespace**: dash.cloudflare.com → **Storage & Databases → KV →
+   Create namespace** (name it e.g. `buktrakr`). Copy its **namespace ID** and
+   put it into `wrangler.jsonc` (`kv_namespaces[0].id`). No clone needed —
+   edit the file straight on GitHub (open `wrangler.jsonc` → pencil icon →
+   commit to `main`), or ask Claude to commit it for you. Do this **before**
+   step 2 so the first deploy succeeds.
+2. **Connect the repo**: **Workers & Pages → Create → Workers → Import a
+   repository** → connect your GitHub account → pick `andrewwetzel/buktrakr`,
+   branch `main`. The defaults are fine — Cloudflare runs
+   `npx wrangler deploy`, which reads `wrangler.jsonc` from the repo root.
+   From now on **every push to `main` auto-deploys**.
+3. **Variables and secrets**: your Worker → **Settings → Variables and
+   Secrets**. Add:
+   - **Secret** `GOOGLE_CLIENT_ID` — from Google step 5
+   - **Secret** `GOOGLE_CLIENT_SECRET` — from Google step 5
+   - **Text** `APP_URL` — `https://YOUR-DOMAIN` (no trailing slash)
+   - **Text** `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` — filled in step 5;
+     you can create them with placeholder values for now.
 
-1. Edit `wrangler.jsonc`: set your hostname in `routes` and `APP_URL`
-   (e.g. `books.yourdomain.com` — the zone must be in your Cloudflare account).
-2. Create the KV namespace and paste its id into `wrangler.jsonc`:
+   These live only in the dashboard (`keep_vars` in `wrangler.jsonc` stops
+   deploys from overwriting them), so you can edit them any time without
+   touching the repo.
+4. **Custom domain**: your Worker → **Settings → Domains & Routes → Add →
+   Custom domain** → `books.yourdomain.com` (any hostname on a zone in your
+   account). Cloudflare creates the DNS record and certificate automatically.
+5. **Zero Trust Access**: one.dash.cloudflare.com → **Access →
+   Applications → Add an application → Self-hosted**:
+   - Application domain = the hostname from step 4; session duration to taste
+     (e.g. 1 week).
+   - Add an **Allow** policy including the emails (or email domain) of
+     everyone who may use the app. The default One-Time PIN login works out of
+     the box; add Google SSO as an identity provider if you prefer.
+   - Do **not** add a bypass for `/auth/callback` — the browser carries the
+     Access cookie through Google's redirect, so it passes through normally.
+6. Back in the Worker's **Variables and Secrets**, set the real values:
+   - `ACCESS_AUD` = the Access application's **AUD tag** (application →
+     Overview / Basic information).
+   - `ACCESS_TEAM_DOMAIN` = your team domain, e.g.
+     `yourteam.cloudflareaccess.com` (Zero Trust → Settings → Custom Pages).
 
-   ```sh
-   npx wrangler kv namespace create KV
-   ```
-
-3. Set the Google secrets:
-
-   ```sh
-   npx wrangler secret put GOOGLE_CLIENT_ID
-   npx wrangler secret put GOOGLE_CLIENT_SECRET
-   ```
-
-4. Deploy (`custom_domain: true` auto-creates the DNS record + cert):
-
-   ```sh
-   npm install
-   npx wrangler deploy
-   ```
-
-5. **Zero Trust dashboard → Access → Applications → Add an application →
-   Self-hosted**: application domain = your hostname, session duration to
-   taste (e.g. 1 week). Add an **Allow** policy including the emails (or email
-   domain) of everyone who may use the app. The default One-Time PIN login
-   works out of the box; add Google SSO as an identity provider if you prefer.
-   Do **not** add a bypass for `/auth/callback` — the browser carries the
-   Access cookie through Google's redirect, so it passes through normally.
-6. Copy the Access application's **AUD tag** (app → Overview) into
-   `ACCESS_AUD` in `wrangler.jsonc`, and set `ACCESS_TEAM_DOMAIN` to your team
-   domain (`yourteam.cloudflareaccess.com`, shown under Zero Trust → Settings).
-   Redeploy: `npx wrangler deploy`.
+   Saving variables redeploys the Worker immediately — no push needed.
 
 That's it. Visit the hostname, pass the Access login, click **Connect Google
 account**, and start logging books. Each new user covered by the policy repeats
 only the connect step.
 
-## Local development
+## Making changes
+
+Push (or merge) to `main` and Cloudflare rebuilds and deploys automatically.
+Build history and logs are under the Worker's **Deployments** tab.
+
+## Local development (optional)
+
+Not required for deployment, but the app runs fully locally if you ever want
+it to:
 
 ```sh
 cp .dev.vars.example .dev.vars   # fill in Google client ID/secret + your email
@@ -100,7 +119,7 @@ Access isn't in front of `wrangler dev`, so `.dev.vars` sets `DEV_USER_EMAIL`,
 which is used **only when the `Cf-Access-Jwt-Assertion` header is absent**.
 Since `DEV_USER_EMAIL` is never configured in production, the bypass cannot
 apply there. The full OAuth + Docs flow works locally against the real Google
-APIs via the `http://localhost:8787/auth/callback` redirect URI.
+APIs if you registered the `http://localhost:8787/auth/callback` redirect URI.
 
 ## Behavior notes
 
@@ -113,7 +132,7 @@ APIs via the `http://localhost:8787/auth/callback` redirect URI.
   their Access email — that's allowed; the doc simply lives wherever they
   connected.
 
-## Verifying a deployment
+## Verifying the deployment
 
 1. `curl -I https://YOUR-DOMAIN/` while logged out → 302 to
    `…cloudflareaccess.com` (Access is fronting the app).
