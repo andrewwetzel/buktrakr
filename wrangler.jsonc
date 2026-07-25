@@ -4,6 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
 
+  // The Worker is fully stateless — no KV, D1, or other bindings. All state
+  // lives in the user's encrypted session cookie.
+  //
   // Secrets (dashboard: Settings -> Variables and Secrets, or `wrangler
   // secret put`): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET.
   // keep_vars stops git-triggered deploys from wiping dashboard-set values.
@@ -12,10 +15,5 @@
   "assets": {
     "directory": "public",
     "run_worker_first": ["/api/*", "/auth/*"]
-  },
-
-  // Deploying with the "Deploy to Cloudflare" button provisions this
-  // namespace automatically. Deploying manually: create a KV namespace
-  // (dashboard -> Storage & Databases -> KV) and paste its ID here.
-  "kv_namespaces": [{ "binding": "KV", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }]
+  }
 }

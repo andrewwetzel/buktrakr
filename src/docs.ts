@@ -37,6 +37,27 @@ export function docUrl(docId: string): string {
   return `https://docs.google.com/document/d/${docId}/edit`;
 }
 
+/**
+ * Finds the reviews doc among files this app created (all drive.file lets it
+ * see), so a sign-in from a fresh browser reuses the existing doc instead of
+ * creating a duplicate. Returns the oldest match or null.
+ */
+export async function findDoc(accessToken: string): Promise<string | null> {
+  const q = `name = '${DOC_TITLE}' and mimeType = 'application/vnd.google-apps.document' and trashed = false`;
+  const params = new URLSearchParams({
+    q,
+    orderBy: "createdTime",
+    pageSize: "1",
+    fields: "files(id)",
+  });
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+    headers: authHeaders(accessToken),
+  });
+  if (!res.ok) throw new Error(`Doc search failed: ${res.status}`);
+  const body = (await res.json()) as { files?: { id?: string }[] };
+  return body.files?.[0]?.id ?? null;
+}
+
 async function getEndIndex(accessToken: string, docId: string): Promise<number> {
   const res = await fetch(
     `https://docs.googleapis.com/v1/documents/${docId}?fields=body(content(endIndex))`,

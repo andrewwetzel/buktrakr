@@ -6,21 +6,13 @@ import {
   ReconnectRequiredError,
 } from "./google";
 import { createSessionToken, verifySessionToken, type SessionData } from "./session";
-import { appendEntry, createDoc, docUrl, DocNotFoundError, type Entry } from "./docs";
+import { appendEntry, createDoc, docUrl, findDoc, DocNotFoundError, type Entry } from "./docs";
 
 export interface Env {
-  KV: KVNamespace;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
-  /** Any long random string; signs session cookies. */
+  /** Any long random string; encrypts session cookies. */
   SESSION_SECRET: string;
-}
-
-interface UserRecord {
-  refreshToken: string | null;
-  docId: string | null;
-  email: string | null;
-  connectedAt: string | null;
 }
 
 const SESSION_COOKIE = "buktrakr_session";
@@ -59,16 +51,12 @@ async function getSession(request: Request, env: Env): Promise<SessionData | nul
   return token ? verifySessionToken(env.SESSION_SECRET, token) : null;
 }
 
-const userKey = (sub: string): string => `user:${sub}`;
-
-async function getUser(env: Env, sub: string): Promise<UserRecord> {
-  const raw = await env.KV.get(userKey(sub));
-  if (!raw) return { refreshToken: null, docId: null, email: null, connectedAt: null };
-  return JSON.parse(raw) as UserRecord;
-}
-
-const putUser = (env: Env, sub: string, record: UserRecord): Promise<void> =>
-  env.KV.put(userKey(sub), JSON.stringify(record));
+const sessionCookie = async (env: Env, data: SessionData): Promise<string> =>
+  setCookie(
+    SESSION_COOKIE,
+    await createSessionToken(env.SESSION_SECRET, data, SESSION_TTL_S),
+    SESSION_TTL_S
+  );
 
 function validateEntry(body: unknown): Entry | null {
   if (typeof body !== "object" || body === null) return null;
@@ -99,12 +87,10 @@ export default {
         case "GET /api/status": {
           const session = await getSession(request, env);
           if (!session) return json({ signedIn: false });
-          const user = await getUser(env, session.sub);
           return json({
             signedIn: true,
             email: session.email,
-            connected: Boolean(user.refreshToken),
-            docUrl: user.docId ? docUrl(user.docId) : null,
+            docUrl: session.docId ? docUrl(session.docId) : null,
           });
         }
 
@@ -133,28 +119,23 @@ export default {
           );
           if (!claims) return redirect(`${url.origin}/?error=oauth`, [clearState]);
 
-          const existing = await getUser(env, claims.sub);
-          const effectiveToken = refreshToken ?? existing.refreshToken;
+          // Google only returns a refresh token when consent was prompted;
+          // fall back to the one in this browser's still-valid session.
+          const prior = await getSession(request, env);
+          const carried = prior?.sub === claims.sub ? prior : null;
+          const effectiveToken = refreshToken ?? carried?.refreshToken;
           if (!effectiveToken) {
-            // Returning user whose stored token is gone: Google only reissues
-            // a refresh token when consent is re-prompted.
             return redirect(`${url.origin}/auth/google?consent=1`, [clearState]);
           }
-          await putUser(env, claims.sub, {
-            refreshToken: effectiveToken,
-            docId: existing.docId,
-            email: claims.email,
-            connectedAt: existing.connectedAt ?? new Date().toISOString(),
-          });
 
-          const session = await createSessionToken(
-            env.SESSION_SECRET,
-            { sub: claims.sub, email: claims.email ?? "" },
-            SESSION_TTL_S
-          );
           return redirect(`${url.origin}/`, [
             clearState,
-            setCookie(SESSION_COOKIE, session, SESSION_TTL_S),
+            await sessionCookie(env, {
+              sub: claims.sub,
+              email: claims.email ?? "",
+              refreshToken: effectiveToken,
+              docId: carried?.docId ?? null,
+            }),
           ]);
         }
 
@@ -164,34 +145,32 @@ export default {
           const entry = validateEntry(await request.json().catch(() => null));
           if (!entry) return json({ error: "invalid_entry" }, 400);
 
-          const user = await getUser(env, session.sub);
-          if (!user.refreshToken) return json({ error: "reconnect_required" }, 409);
-
           let accessToken: string;
           try {
-            accessToken = await refreshAccessToken(env, user.refreshToken);
+            accessToken = await refreshAccessToken(env, session.refreshToken);
           } catch (err) {
             if (err instanceof ReconnectRequiredError) {
-              await putUser(env, session.sub, { ...user, refreshToken: null });
               return json({ error: "reconnect_required" }, 409);
             }
             throw err;
           }
 
-          if (!user.docId) {
-            user.docId = await createDoc(accessToken);
-            await putUser(env, session.sub, user);
-          }
+          // Cookie may not know the doc (fresh browser): find the one this
+          // app created earlier, or create it.
+          let docId = session.docId ?? (await findDoc(accessToken)) ?? (await createDoc(accessToken));
           try {
-            await appendEntry(accessToken, user.docId, entry);
+            await appendEntry(accessToken, docId, entry);
           } catch (err) {
             if (!(err instanceof DocNotFoundError)) throw err;
-            // User deleted the doc in Drive: create a fresh one, retry once.
-            user.docId = await createDoc(accessToken);
-            await putUser(env, session.sub, user);
-            await appendEntry(accessToken, user.docId, entry);
+            // Stale id (doc deleted in Drive): rediscover or recreate, retry once.
+            docId = (await findDoc(accessToken)) ?? (await createDoc(accessToken));
+            await appendEntry(accessToken, docId, entry);
           }
-          return json({ ok: true, docUrl: docUrl(user.docId) });
+
+          // Re-issue the cookie so it remembers the doc (and rolls the expiry).
+          return json({ ok: true, docUrl: docUrl(docId) }, 200, [
+            await sessionCookie(env, { ...session, docId }),
+          ]);
         }
 
         case "POST /api/signout": {
@@ -201,9 +180,7 @@ export default {
         case "POST /api/disconnect": {
           const session = await getSession(request, env);
           if (!session) return json({ error: "signin_required" }, 401);
-          const user = await getUser(env, session.sub);
-          if (user.refreshToken) await revokeToken(user.refreshToken);
-          await putUser(env, session.sub, { ...user, refreshToken: null });
+          await revokeToken(session.refreshToken);
           return json({ ok: true }, 200, [clearCookie(SESSION_COOKIE)]);
         }
 

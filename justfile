@@ -28,19 +28,15 @@ deploy:
 logs:
     npx wrangler tail
 
-# Show the stored record for a user's Google sub id, e.g. `just kv-user 1234567890`
-kv-user sub:
-    npx wrangler kv key get "user:{{sub}}" --binding KV --remote
-
 # Print the one-time setup checklist
 setup:
     #!/usr/bin/env bash
     cat <<'EOF'
     BukTrakr one-time setup
     =======================
-    Fastest path: click the "Deploy to Cloudflare" button in README.md —
-    it clones the repo, provisions the KV namespace, and sets up deploys
-    from main. Then do A5 and B2 below.
+    The Worker is stateless — nothing to provision. Fastest path: click
+    the "Deploy to Cloudflare" button in README.md (clones the repo and
+    sets up deploys from main), then do A5 and B2 below.
 
     A. Google Cloud (console.cloud.google.com)
        1. Create a project (e.g. "buktrakr").
@@ -58,11 +54,9 @@ setup:
           Note the client ID + secret.
 
     B. Cloudflare dashboard (dash.cloudflare.com)
-       1. Skip if you used the deploy button. Otherwise: Storage &
-          Databases -> KV -> Create namespace; paste its ID into
-          wrangler.jsonc (kv_namespaces[0].id); then Workers & Pages ->
-          Create -> Workers -> Import a repository -> this repo, branch
-          main. Every push to main now auto-deploys.
+       1. Skip if you used the deploy button. Otherwise: Workers & Pages
+          -> Create -> Workers -> Import a repository -> this repo,
+          branch main. Every push to main now auto-deploys.
        2. Worker -> Settings -> Variables and Secrets — add three SECRETS:
             GOOGLE_CLIENT_ID      (from A5)
             GOOGLE_CLIENT_SECRET  (from A5)
