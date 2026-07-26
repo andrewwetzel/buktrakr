@@ -70,11 +70,12 @@ function validateEntry(body: unknown): Entry | null {
     v === undefined || v === null ? "" : typeof v === "string" && v.length <= 5000 ? v : null;
   const liked = text(b.liked);
   const disliked = text(b.disliked);
-  if (!title || !author || liked === null || disliked === null) return null;
+  const notes = text(b.notes);
+  if (!title || !author || liked === null || disliked === null || notes === null) return null;
   if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 10) {
     return null;
   }
-  return { title, author, rating, liked, disliked };
+  return { title, author, rating, liked, disliked, notes };
 }
 
 export default {

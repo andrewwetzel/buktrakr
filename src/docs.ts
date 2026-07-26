@@ -12,6 +12,7 @@ export interface Entry {
   rating: number;
   liked: string;
   disliked: string;
+  notes: string;
 }
 
 function authHeaders(accessToken: string): Record<string, string> {
@@ -88,10 +89,12 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
   const lines = [
     clean(`${entry.title} — ${entry.author}`),
     `Rating: ${entry.rating}/10 · ${date}`,
-    "What I liked",
+    "The Good",
     clean(entry.liked.trim()) || "—",
-    "What I didn't like",
+    "The Bad",
     clean(entry.disliked.trim()) || "—",
+    "The Other",
+    clean(entry.notes.trim()) || "—",
   ];
 
   let text = "";
@@ -100,7 +103,7 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
     ranges.push({ start: insertAt + text.length, end: insertAt + text.length + line.length });
     text += line + "\n";
   }
-  const [titleR, ratingR, likedLabelR, , dislikedLabelR] = ranges;
+  const [titleR, ratingR, goodLabelR, , badLabelR, , otherLabelR] = ranges;
   const blockEnd = insertAt + text.length;
 
   const requests = [
@@ -127,20 +130,13 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
         fields: "italic",
       },
     },
-    {
+    ...[goodLabelR, badLabelR, otherLabelR].map((r) => ({
       updateTextStyle: {
-        range: { startIndex: likedLabelR.start, endIndex: likedLabelR.end },
+        range: { startIndex: r.start, endIndex: r.end },
         textStyle: { bold: true },
         fields: "bold",
       },
-    },
-    {
-      updateTextStyle: {
-        range: { startIndex: dislikedLabelR.start, endIndex: dislikedLabelR.end },
-        textStyle: { bold: true },
-        fields: "bold",
-      },
-    },
+    })),
   ];
 
   const res = await fetch(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
