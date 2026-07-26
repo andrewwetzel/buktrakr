@@ -71,6 +71,13 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
   cookie doesn't know the doc yet (fresh browser), the Worker searches the
   files the app created (`drive.file` scope allows exactly that) and reuses
   the existing doc — no duplicates — creating it only if none exists.
+- **Book autocomplete**: typing a title searches the Google Books API from
+  the browser (falling back to Open Library), and picking a suggestion fills
+  the title, author, ISBN, and cover. The cover is embedded in the doc entry
+  (cover URLs are validated server-side against the two book APIs' hosts).
+- **AI recommendations export**: "Copy AI prompt" reads your whole reviews
+  doc back and copies it wrapped in a ready-made prompt, so you can paste it
+  into any AI chat and get book suggestions matched to your tastes.
 - Privacy: the `drive.file` scope means the app **cannot see anything in a
   user's Drive except docs it created itself**, and since there's no
   server-side storage, signing out (or clearing cookies) removes every trace

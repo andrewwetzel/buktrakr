@@ -6,7 +6,15 @@ import {
   ReconnectRequiredError,
 } from "./google";
 import { createSessionToken, verifySessionToken, type SessionData } from "./session";
-import { appendEntry, createDoc, docUrl, findDoc, DocNotFoundError, type Entry } from "./docs";
+import {
+  appendEntry,
+  createDoc,
+  docUrl,
+  findDoc,
+  getDocText,
+  DocNotFoundError,
+  type Entry,
+} from "./docs";
 
 export interface Env {
   GOOGLE_CLIENT_ID: string;
@@ -79,7 +87,23 @@ function validateEntry(body: unknown): Entry | null {
     typeof b.isbn === "string" && b.isbn.length <= 32
       ? b.isbn.replace(/[^0-9Xx-]/g, "")
       : "";
-  return { title, author, rating, isbn, liked, disliked, notes };
+  // Only cover URLs from the book APIs may be embedded into users' docs.
+  let coverUrl = "";
+  if (typeof b.coverUrl === "string" && b.coverUrl.length <= 500) {
+    try {
+      const u = new URL(b.coverUrl);
+      const host = u.hostname;
+      const allowedHost =
+        host === "books.google.com" ||
+        host === "covers.openlibrary.org" ||
+        host.endsWith(".googleusercontent.com") ||
+        host.endsWith(".gstatic.com");
+      if (u.protocol === "https:" && allowedHost) coverUrl = u.toString();
+    } catch {
+      // Not a URL — ignore.
+    }
+  }
+  return { title, author, rating, isbn, coverUrl, liked, disliked, notes };
 }
 
 export default {
@@ -186,6 +210,45 @@ export default {
           return json({ ok: true, docUrl: docUrl(docId) }, 200, [
             await sessionCookie(env, { ...session, docId }),
           ]);
+        }
+
+        case "GET /api/export": {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "signin_required" }, 401);
+
+          let accessToken: string;
+          try {
+            accessToken = await refreshAccessToken(env, session.refreshToken);
+          } catch (err) {
+            if (err instanceof ReconnectRequiredError) {
+              return json({ error: "reconnect_required" }, 409);
+            }
+            throw err;
+          }
+
+          const docId = session.docId ?? (await findDoc(accessToken));
+          if (!docId) return json({ error: "no_doc" }, 404);
+          let log: string;
+          try {
+            log = (await getDocText(accessToken, docId)).trim();
+          } catch (err) {
+            if (err instanceof DocNotFoundError) return json({ error: "no_doc" }, 404);
+            throw err;
+          }
+          if (!log) return json({ error: "no_doc" }, 404);
+
+          // Keep the prompt pasteable: trim to the most recent entries.
+          const MAX_LOG_CHARS = 15000;
+          if (log.length > MAX_LOG_CHARS) {
+            log = "(earlier entries omitted)\n…" + log.slice(-MAX_LOG_CHARS);
+          }
+          const prompt =
+            "Below is my personal book review log — titles, authors, ratings out of 10, " +
+            "and what I thought of each (The Good / The Bad / The Other). Based on my " +
+            "tastes, please suggest 8–10 books or authors I'd likely enjoy, with a " +
+            "sentence for each on why it fits me.\n\n---\n\n" +
+            log;
+          return json({ prompt });
         }
 
         case "POST /api/signout": {

@@ -11,6 +11,7 @@ export interface Entry {
   author: string;
   rating: number;
   isbn: string;
+  coverUrl: string;
   liked: string;
   disliked: string;
   notes: string;
@@ -89,24 +90,34 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
   const date = new Date().toISOString().slice(0, 10);
   const meta = [`Rating: ${entry.rating}/10`, date];
   if (entry.isbn) meta.push(`ISBN ${entry.isbn}`);
-  const lines = [
-    clean(`${entry.title} — ${entry.author}`),
-    meta.join(" · "),
-    "The Good",
-    clean(entry.liked.trim()) || "—",
-    "The Bad",
-    clean(entry.disliked.trim()) || "—",
-    "The Other",
-    clean(entry.notes.trim()) || "—",
+  const hasCover = Boolean(entry.coverUrl);
+  const parts: { text: string; kind: "title" | "cover" | "meta" | "label" | "body" }[] = [
+    { text: clean(`${entry.title} — ${entry.author}`), kind: "title" },
+    // Empty paragraph reserved for the inline cover image.
+    ...(hasCover ? [{ text: "", kind: "cover" as const }] : []),
+    { text: meta.join(" · "), kind: "meta" },
+    { text: "The Good", kind: "label" },
+    { text: clean(entry.liked.trim()) || "—", kind: "body" },
+    { text: "The Bad", kind: "label" },
+    { text: clean(entry.disliked.trim()) || "—", kind: "body" },
+    { text: "The Other", kind: "label" },
+    { text: clean(entry.notes.trim()) || "—", kind: "body" },
   ];
 
   let text = "";
-  const ranges: { start: number; end: number }[] = [];
-  for (const line of lines) {
-    ranges.push({ start: insertAt + text.length, end: insertAt + text.length + line.length });
-    text += line + "\n";
+  const ranges: { kind: string; start: number; end: number }[] = [];
+  for (const part of parts) {
+    ranges.push({
+      kind: part.kind,
+      start: insertAt + text.length,
+      end: insertAt + text.length + part.text.length,
+    });
+    text += part.text + "\n";
   }
-  const [titleR, ratingR, goodLabelR, , badLabelR, , otherLabelR] = ranges;
+  const titleR = ranges[0];
+  const metaR = ranges.find((r) => r.kind === "meta")!;
+  const coverR = ranges.find((r) => r.kind === "cover");
+  const labelRs = ranges.filter((r) => r.kind === "label");
   const blockEnd = insertAt + text.length;
 
   const requests = [
@@ -121,19 +132,19 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
     // Explicit NORMAL_TEXT so the rest never inherits heading style.
     {
       updateParagraphStyle: {
-        range: { startIndex: ratingR.start, endIndex: blockEnd },
+        range: { startIndex: titleR.end + 1, endIndex: blockEnd },
         paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
         fields: "namedStyleType",
       },
     },
     {
       updateTextStyle: {
-        range: { startIndex: ratingR.start, endIndex: ratingR.end },
+        range: { startIndex: metaR.start, endIndex: metaR.end },
         textStyle: { italic: true },
         fields: "italic",
       },
     },
-    ...[goodLabelR, badLabelR, otherLabelR].map((r) => ({
+    ...labelRs.map((r) => ({
       updateTextStyle: {
         range: { startIndex: r.start, endIndex: r.end },
         textStyle: { bold: true },
@@ -149,4 +160,49 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
   });
   if (res.status === 404) throw new DocNotFoundError();
   if (!res.ok) throw new Error(`Doc append failed: ${res.status} ${await res.text()}`);
+
+  // The cover goes in a separate batch: Google fetches the image URL
+  // server-side and can refuse (stale link, size), and that must never cost
+  // the user their review text — so failures here are swallowed.
+  if (coverR) {
+    try {
+      await fetch(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
+        method: "POST",
+        headers: authHeaders(accessToken),
+        body: JSON.stringify({
+          requests: [
+            {
+              insertInlineImage: {
+                location: { index: coverR.start },
+                uri: entry.coverUrl,
+                objectSize: { height: { magnitude: 120, unit: "PT" } },
+              },
+            },
+          ],
+        }),
+      });
+    } catch {
+      // Best-effort only.
+    }
+  }
+}
+
+/** Full plain text of the doc (for the AI-recommendations export). */
+export async function getDocText(accessToken: string, docId: string): Promise<string> {
+  const res = await fetch(
+    `https://docs.googleapis.com/v1/documents/${docId}?fields=body(content(paragraph(elements(textRun(content)))))`,
+    { headers: authHeaders(accessToken) }
+  );
+  if (res.status === 404) throw new DocNotFoundError();
+  if (!res.ok) throw new Error(`Doc read failed: ${res.status}`);
+  const body = (await res.json()) as {
+    body?: { content?: { paragraph?: { elements?: { textRun?: { content?: string } }[] } }[] };
+  };
+  let text = "";
+  for (const el of body.body?.content ?? []) {
+    for (const pe of el.paragraph?.elements ?? []) {
+      text += pe.textRun?.content ?? "";
+    }
+  }
+  return text;
 }
