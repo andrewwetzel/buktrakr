@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#3b6e4f"/>
+  <!-- open book, left and right pages -->
+  <path d="M256 176 C 224 154 164 144 118 150 L 118 358 C 164 352 224 362 256 384 Z" fill="#f6f4ef"/>
+  <path d="M256 176 C 288 154 348 144 394 150 L 394 358 C 348 352 288 362 256 384 Z" fill="#f6f4ef"/>
+  <!-- page lines -->
+  <path d="M150 196 C 178 192 210 196 232 206 M150 236 C 178 232 210 236 232 246 M150 276 C 178 272 210 276 232 286" stroke="#3b6e4f" stroke-width="10" stroke-linecap="round" fill="none" opacity="0.35"/>
+  <path d="M362 196 C 334 192 302 196 280 206 M362 236 C 334 232 302 236 280 246 M362 276 C 334 272 302 276 280 286" stroke="#3b6e4f" stroke-width="10" stroke-linecap="round" fill="none" opacity="0.35"/>
+</svg>

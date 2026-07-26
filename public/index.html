@@ -4,6 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BukTrakr</title>
+  <meta name="description" content="Log books you've read — rating, the good, the bad — straight into a Google Doc in your own Drive.">
+  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1d1b17" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="BukTrakr">
+  <meta property="og:title" content="BukTrakr">
+  <meta property="og:description" content="Log books you've read into a Google Doc in your own Drive — every user gets their own doc.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/icons/icon-512.png">
+  <meta name="twitter:card" content="summary">
   <style>
     :root {
       --bg: #f6f4ef;
@@ -111,6 +126,20 @@
       background: var(--bg);
     }
     .suggestions .s-meta { display: block; color: var(--muted); font-size: 0.85rem; }
+    .suggestions button.active { background: var(--bg); }
+    .hint { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; font-style: italic; }
+    #recent-list { list-style: none; margin: 0.6rem 0 0; padding: 0; }
+    #recent-list li {
+      padding: 0.4rem 0;
+      border-top: 1px solid var(--line);
+      font-size: 0.95rem;
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    #recent-list li:first-child { border-top: none; }
+    #recent-list .s-meta { flex: none; }
     button {
       font: inherit;
       border: none;
@@ -172,6 +201,7 @@
                aria-expanded="false" aria-controls="suggestions">
         <div id="suggestions" class="suggestions hidden" role="listbox"></div>
       </div>
+      <div id="dup-hint" class="hint hidden"></div>
 
       <label for="author">Author</label>
       <input id="author" name="author" required maxlength="500" autocomplete="off">
@@ -199,6 +229,14 @@
       <div id="message"></div>
     </form>
 
+    <div class="card hidden" id="recent-card">
+      <div class="row">
+        <strong>Recently logged</strong>
+        <span class="who" id="stats"></span>
+      </div>
+      <ul id="recent-list"></ul>
+    </div>
+
     <footer>Nothing is stored on the server. Your Google connection lives in an
       encrypted cookie in this browser, and the app can only touch the one doc
       it creates in your Drive. Book search powered by the Google Books API.</footer>
@@ -221,18 +259,33 @@
     let searchTimer = null;
     let searchAbort = null;
 
+    let activeIndex = -1;
+
     function hideSuggestions() {
       show($("suggestions"), false);
       $("title").setAttribute("aria-expanded", "false");
+      $("title").removeAttribute("aria-activedescendant");
+      activeIndex = -1;
+    }
+
+    function setActive(i) {
+      const opts = $("suggestions").querySelectorAll("button");
+      if (!opts.length) return;
+      activeIndex = (i + opts.length) % opts.length;
+      opts.forEach((o, idx) => o.classList.toggle("active", idx === activeIndex));
+      opts[activeIndex].scrollIntoView({ block: "nearest" });
+      $("title").setAttribute("aria-activedescendant", opts[activeIndex].id);
     }
 
     // Normalized suggestion shape: { title, authors, year, isbn, cover }
     function renderSuggestions(books) {
       const box = $("suggestions");
       box.textContent = "";
-      for (const b of books) {
+      activeIndex = -1;
+      books.forEach((b, idx) => {
         const btn = document.createElement("button");
         btn.type = "button";
+        btn.id = `sugg-${idx}`;
         btn.setAttribute("role", "option");
         if (b.cover) {
           const img = document.createElement("img");
@@ -254,10 +307,11 @@
           $("isbn").value = b.isbn;
           $("coverUrl").value = b.cover;
           hideSuggestions();
+          checkDuplicate();
           $("rating").focus();
         });
         box.append(btn);
-      }
+      });
       show(box, books.length > 0);
       $("title").setAttribute("aria-expanded", String(books.length > 0));
     }
@@ -335,6 +389,7 @@
     $("title").addEventListener("input", () => {
       clearTimeout(searchTimer);
       $("coverUrl").value = ""; // manual edits invalidate the picked cover
+      checkDuplicate();
       const q = $("title").value.trim();
       if (q.length < 3) {
         hideSuggestions();
@@ -343,7 +398,21 @@
       searchTimer = setTimeout(() => searchBooks(q), 300);
     });
     $("title").addEventListener("keydown", (e) => {
-      if (e.key === "Escape") hideSuggestions();
+      if (e.key === "Escape") {
+        hideSuggestions();
+        return;
+      }
+      if ($("suggestions").classList.contains("hidden")) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActive(activeIndex + 1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActive(activeIndex - 1);
+      } else if (e.key === "Enter" && activeIndex >= 0) {
+        e.preventDefault();
+        $("suggestions").querySelectorAll("button")[activeIndex].click();
+      }
     });
     document.addEventListener("click", (e) => {
       if (!e.target.closest(".lookup")) hideSuggestions();
@@ -355,11 +424,63 @@
       el.className = kind || "";
     }
 
+    let allEntries = [];
+    let uiState = "signedOut";
+
     function render(state) {
+      uiState = state;
       show($("signin-card"), state === "signedOut");
       show($("reconnect-card"), state === "reconnect");
       show($("status"), state !== "signedOut");
       show($("entry-form"), state === "ready");
+      show($("recent-card"), state === "ready" && allEntries.length > 0);
+    }
+
+    function fmtDate(iso) {
+      return new Date(iso + "T00:00:00Z").toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      });
+    }
+
+    async function loadRecent() {
+      try {
+        const res = await fetch("/api/recent");
+        if (!res.ok) return;
+        const data = await res.json();
+        allEntries = data.entries || [];
+        const list = $("recent-list");
+        list.textContent = "";
+        for (const e of allEntries.slice(-5).reverse()) {
+          const li = document.createElement("li");
+          const name = document.createElement("span");
+          name.textContent = e.author ? `${e.title} — ${e.author}` : e.title;
+          const meta = document.createElement("span");
+          meta.className = "s-meta";
+          meta.textContent = `${e.rating}/10 · ${fmtDate(e.date)}`;
+          li.append(name, meta);
+          list.append(li);
+        }
+        $("stats").textContent = data.stats
+          ? `${data.stats.total} logged · ${data.stats.thisYear} this year · ${data.stats.avgRating} avg`
+          : "";
+        show($("recent-card"), uiState === "ready" && allEntries.length > 0);
+        checkDuplicate();
+      } catch {
+        // Best-effort — the form works without it.
+      }
+    }
+
+    const normTitle = (s) => s.toLowerCase().trim().replace(/[.!?…]+$/, "");
+
+    function checkDuplicate() {
+      const q = normTitle($("title").value);
+      const hit = q && allEntries.find((e) => normTitle(e.title) === q);
+      if (hit) {
+        $("dup-hint").textContent = `Looks like you logged this on ${hit.date} (${hit.rating}/10).`;
+      }
+      show($("dup-hint"), Boolean(hit));
     }
 
     async function loadStatus() {
@@ -375,6 +496,7 @@
         show($("doc-link"), true);
       }
       render("ready");
+      loadRecent();
     }
 
     $("signin").addEventListener("click", () => {
@@ -438,6 +560,7 @@
             show($("doc-link"), true);
           }
           setMessage("Saved to your doc ✓", "ok");
+          loadRecent();
         } else if (res.status === 401) {
           render("signedOut");
         } else if (res.status === 409) {

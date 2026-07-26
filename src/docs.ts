@@ -187,6 +187,39 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
   }
 }
 
+export interface ParsedEntry {
+  title: string;
+  author: string;
+  rating: number;
+  date: string;
+}
+
+/**
+ * Recovers the logged entries from the doc's plain text: a meta line marks an
+ * entry, and the nearest preceding non-empty line is its title heading.
+ * Tolerant of format drift — only those two lines matter.
+ */
+export function parseEntries(text: string): ParsedEntry[] {
+  const lines = text.split("\n");
+  const entries: ParsedEntry[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^Rating: (\d{1,2})\/10 · (\d{4}-\d{2}-\d{2})/);
+    if (!m) continue;
+    let j = i - 1;
+    while (j >= 0 && !lines[j].trim()) j--;
+    if (j < 0) continue;
+    const titleLine = lines[j].trim();
+    const sep = titleLine.lastIndexOf(" — ");
+    entries.push({
+      title: sep > 0 ? titleLine.slice(0, sep) : titleLine,
+      author: sep > 0 ? titleLine.slice(sep + 3) : "",
+      rating: Number(m[1]),
+      date: m[2],
+    });
+  }
+  return entries;
+}
+
 /** Full plain text of the doc (for the AI-recommendations export). */
 export async function getDocText(accessToken: string, docId: string): Promise<string> {
   const res = await fetch(

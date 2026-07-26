@@ -12,6 +12,7 @@ import {
   docUrl,
   findDoc,
   getDocText,
+  parseEntries,
   DocNotFoundError,
   type Entry,
 } from "./docs";
@@ -210,6 +211,42 @@ export default {
           return json({ ok: true, docUrl: docUrl(docId) }, 200, [
             await sessionCookie(env, { ...session, docId }),
           ]);
+        }
+
+        case "GET /api/recent": {
+          const session = await getSession(request, env);
+          if (!session) return json({ error: "signin_required" }, 401);
+
+          let accessToken: string;
+          try {
+            accessToken = await refreshAccessToken(env, session.refreshToken);
+          } catch (err) {
+            if (err instanceof ReconnectRequiredError) {
+              return json({ error: "reconnect_required" }, 409);
+            }
+            throw err;
+          }
+
+          const docId = session.docId ?? (await findDoc(accessToken));
+          if (!docId) return json({ entries: [], stats: null });
+          let docText: string;
+          try {
+            docText = await getDocText(accessToken, docId);
+          } catch (err) {
+            if (err instanceof DocNotFoundError) return json({ entries: [], stats: null });
+            throw err;
+          }
+
+          const entries = parseEntries(docText);
+          if (entries.length === 0) return json({ entries: [], stats: null });
+          const year = new Date().toISOString().slice(0, 4);
+          const stats = {
+            total: entries.length,
+            thisYear: entries.filter((e) => e.date.startsWith(year)).length,
+            avgRating:
+              Math.round((entries.reduce((s, e) => s + e.rating, 0) / entries.length) * 10) / 10,
+          };
+          return json({ entries, stats });
         }
 
         case "GET /api/export": {

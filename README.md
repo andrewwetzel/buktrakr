@@ -78,6 +78,14 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
 - **AI recommendations export**: "Copy AI prompt" reads your whole reviews
   doc back and copies it wrapped in a ready-made prompt, so you can paste it
   into any AI chat and get book suggestions matched to your tastes.
+- **Recently logged + duplicate hint**: the app parses your doc to show your
+  last five entries with quick stats, and warns (without blocking) when a
+  title you're entering matches something you already logged.
+- **Installable (PWA)**: a web manifest and icons mean you can Add to Home
+  Screen on a phone and it launches full-screen like a native app. There is
+  deliberately no service worker — every action needs Google's APIs, so an
+  offline mode would be an empty shell (and Chrome no longer requires one
+  for installability).
 - Privacy: the `drive.file` scope means the app **cannot see anything in a
   user's Drive except docs it created itself**, and since there's no
   server-side storage, signing out (or clearing cookies) removes every trace
@@ -95,6 +103,16 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
   Docs API; the Worker rediscovers or recreates the doc and retries once.
 - **Sign out** clears the session cookie. **Disconnect** additionally
   revokes the app's Google access.
+
+## Protecting a public instance
+
+The Worker itself is cheap to run and every data-touching route is gated on a
+valid session cookie, but if your instance is open to the whole internet it's
+worth adding one Cloudflare rate-limiting rule (free plan includes one):
+**Security → WAF → Rate limiting rules** → e.g. requests to paths starting
+`/api/` or `/auth/`, 30 requests per minute per IP, action Block. That caps
+abuse of the OAuth redirect and API endpoints without affecting normal use.
+Turnstile/CAPTCHA would be overkill here — there's nothing to farm.
 
 ## Local development
 
