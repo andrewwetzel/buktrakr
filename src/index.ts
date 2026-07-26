@@ -5,7 +5,11 @@ import {
   revokeToken,
   ReconnectRequiredError,
 } from "./google";
-import { createSessionToken, verifySessionToken, type SessionData } from "./session";
+import {
+  createSessionToken,
+  verifySessionToken,
+  type SessionData,
+} from "./session";
 import {
   appendEntry,
   createDoc,
@@ -24,8 +28,10 @@ export interface Env {
   SESSION_SECRET: string;
 }
 
-const SESSION_COOKIE = "buktrakr_session";
-const STATE_COOKIE = "buktrakr_oauth_state";
+// __Host- prefix: browsers reject these cookies unless Secure, Path=/, and
+// host-only — blocks sibling-subdomain cookie planting on custom domains.
+const SESSION_COOKIE = "__Host-buktrakr_session";
+const STATE_COOKIE = "__Host-buktrakr_oauth_state";
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 
 function json(body: unknown, status = 200, cookies: string[] = []): Response {
@@ -45,7 +51,8 @@ function getCookie(request: Request, name: string): string | null {
   const header = request.headers.get("Cookie") ?? "";
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
-    if (eq > 0 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+    if (eq > 0 && part.slice(0, eq).trim() === name)
+      return part.slice(eq + 1).trim();
   }
   return null;
 }
@@ -55,7 +62,10 @@ const setCookie = (name: string, value: string, maxAge: number): string =>
 
 const clearCookie = (name: string): string => setCookie(name, "", 0);
 
-async function getSession(request: Request, env: Env): Promise<SessionData | null> {
+async function getSession(
+  request: Request,
+  env: Env,
+): Promise<SessionData | null> {
   const token = getCookie(request, SESSION_COOKIE);
   return token ? verifySessionToken(env.SESSION_SECRET, token) : null;
 }
@@ -64,24 +74,84 @@ const sessionCookie = async (env: Env, data: SessionData): Promise<string> =>
   setCookie(
     SESSION_COOKIE,
     await createSessionToken(env.SESSION_SECRET, data, SESSION_TTL_S),
-    SESSION_TTL_S
+    SESSION_TTL_S,
   );
 
-function validateEntry(body: unknown): Entry | null {
+/**
+ * Session gate + Google access token, or the error Response to return:
+ * missing/invalid session → 401, revoked refresh token → 409.
+ */
+async function requireAuth(
+  request: Request,
+  env: Env,
+): Promise<{ session: SessionData; accessToken: string } | Response> {
+  const session = await getSession(request, env);
+  if (!session) return json({ error: "signin_required" }, 401);
+  try {
+    return {
+      session,
+      accessToken: await refreshAccessToken(env, session.refreshToken),
+    };
+  } catch (err) {
+    if (err instanceof ReconnectRequiredError) {
+      return json({ error: "reconnect_required" }, 409);
+    }
+    throw err;
+  }
+}
+
+/** The user's doc id and full text, or null when there is no (surviving) doc. */
+async function readUserDoc(
+  session: SessionData,
+  accessToken: string,
+): Promise<{ docId: string; text: string } | null> {
+  const docId = session.docId ?? (await findDoc(accessToken));
+  if (!docId) return null;
+  try {
+    return { docId, text: await getDocText(accessToken, docId) };
+  } catch (err) {
+    if (err instanceof DocNotFoundError) return null;
+    throw err;
+  }
+}
+
+export function validateEntry(body: unknown): Entry | null {
   if (typeof body !== "object" || body === null) return null;
   const b = body as Record<string, unknown>;
-  const str = (v: unknown, max: number): string | null =>
-    typeof v === "string" && v.trim().length > 0 && v.length <= max ? v.trim() : null;
-  const title = str(b.title, 500);
-  const author = str(b.author, 500);
+  // Required single-line field: whitespace (incl. newlines) collapsed so a
+  // pasted multiline title can't span doc paragraphs or confuse parseEntries.
+  const requiredStr = (v: unknown, max: number): string | null => {
+    if (typeof v !== "string" || v.length > max) return null;
+    const collapsed = v.replace(/\s+/g, " ").trim();
+    return collapsed.length > 0 ? collapsed : null;
+  };
+  // Optional multi-line field: absent means empty, oversized means invalid.
+  const optionalStr = (v: unknown): string | null =>
+    v === undefined || v === null
+      ? ""
+      : typeof v === "string" && v.length <= 5000
+        ? v.trim()
+        : null;
+  const title = requiredStr(b.title, 500);
+  const author = requiredStr(b.author, 500);
   const rating = b.rating;
-  const text = (v: unknown): string | null =>
-    v === undefined || v === null ? "" : typeof v === "string" && v.length <= 5000 ? v : null;
-  const liked = text(b.liked);
-  const disliked = text(b.disliked);
-  const notes = text(b.notes);
-  if (!title || !author || liked === null || disliked === null || notes === null) return null;
-  if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 10) {
+  const liked = optionalStr(b.liked);
+  const disliked = optionalStr(b.disliked);
+  const notes = optionalStr(b.notes);
+  if (
+    !title ||
+    !author ||
+    liked === null ||
+    disliked === null ||
+    notes === null
+  )
+    return null;
+  if (
+    typeof rating !== "number" ||
+    !Number.isInteger(rating) ||
+    rating < 1 ||
+    rating > 10
+  ) {
     return null;
   }
   const isbn =
@@ -92,7 +162,8 @@ function validateEntry(body: unknown): Entry | null {
   let date = new Date().toISOString().slice(0, 10);
   if (typeof b.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) {
     const parsed = new Date(b.date + "T00:00:00Z");
-    if (!Number.isNaN(parsed.getTime()) && parsed.getFullYear() >= 1900) date = b.date;
+    if (!Number.isNaN(parsed.getTime()) && parsed.getFullYear() >= 1900)
+      date = b.date;
   }
   // Only cover URLs from the book APIs may be embedded into users' docs.
   let coverUrl = "";
@@ -110,13 +181,31 @@ function validateEntry(body: unknown): Entry | null {
       // Not a URL — ignore.
     }
   }
-  return { title, author, rating, date, isbn, coverUrl, liked, disliked, notes };
+  return {
+    title,
+    author,
+    rating,
+    date,
+    isbn,
+    coverUrl,
+    liked,
+    disliked,
+    notes,
+  };
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const route = `${request.method} ${url.pathname}`;
+
+    // CSRF defense-in-depth beyond SameSite=Lax: cross-origin POSTs carry an
+    // Origin header that won't match ours.
+    if (request.method === "POST") {
+      const origin = request.headers.get("Origin");
+      if (origin && origin !== url.origin)
+        return json({ error: "forbidden" }, 403);
+    }
 
     try {
       switch (route) {
@@ -131,21 +220,31 @@ export default {
         }
 
         case "GET /auth/google": {
-          const missing = (["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SESSION_SECRET"] as const)
-            .filter((k) => !env[k] || !env[k].trim());
+          const missing = (
+            [
+              "GOOGLE_CLIENT_ID",
+              "GOOGLE_CLIENT_SECRET",
+              "SESSION_SECRET",
+            ] as const
+          ).filter((k) => !env[k] || !env[k].trim());
           if (missing.length > 0) {
             return new Response(
               `Server misconfigured: the ${missing.join(", ")} secret${missing.length > 1 ? "s are" : " is"} not set.\n` +
                 `Add ${missing.length > 1 ? "them" : "it"} in the Cloudflare dashboard under ` +
                 `your Worker -> Settings -> Variables and Secrets (type: Secret).`,
-              { status: 500, headers: { "Content-Type": "text/plain" } }
+              { status: 500, headers: { "Content-Type": "text/plain" } },
             );
           }
           const state = crypto.randomUUID();
           const forceConsent = url.searchParams.get("consent") === "1";
           return redirect(
-            buildAuthUrl(env, `${url.origin}/auth/callback`, state, forceConsent),
-            [setCookie(STATE_COOKIE, state, 600)]
+            buildAuthUrl(
+              env,
+              `${url.origin}/auth/callback`,
+              state,
+              forceConsent,
+            ),
+            [setCookie(STATE_COOKIE, state, 600)],
           );
         }
 
@@ -161,9 +260,10 @@ export default {
           const { refreshToken, claims } = await exchangeCode(
             env,
             `${url.origin}/auth/callback`,
-            code
+            code,
           );
-          if (!claims) return redirect(`${url.origin}/?error=oauth`, [clearState]);
+          if (!claims)
+            return redirect(`${url.origin}/?error=oauth`, [clearState]);
 
           // Google only returns a refresh token when consent was prompted;
           // fall back to the one in this browser's still-valid session.
@@ -171,7 +271,9 @@ export default {
           const carried = prior?.sub === claims.sub ? prior : null;
           const effectiveToken = refreshToken ?? carried?.refreshToken;
           if (!effectiveToken) {
-            return redirect(`${url.origin}/auth/google?consent=1`, [clearState]);
+            return redirect(`${url.origin}/auth/google?consent=1`, [
+              clearState,
+            ]);
           }
 
           return redirect(`${url.origin}/`, [
@@ -186,30 +288,25 @@ export default {
         }
 
         case "POST /api/entries": {
-          const session = await getSession(request, env);
-          if (!session) return json({ error: "signin_required" }, 401);
+          const auth = await requireAuth(request, env);
+          if (auth instanceof Response) return auth;
+          const { session, accessToken } = auth;
           const entry = validateEntry(await request.json().catch(() => null));
           if (!entry) return json({ error: "invalid_entry" }, 400);
 
-          let accessToken: string;
-          try {
-            accessToken = await refreshAccessToken(env, session.refreshToken);
-          } catch (err) {
-            if (err instanceof ReconnectRequiredError) {
-              return json({ error: "reconnect_required" }, 409);
-            }
-            throw err;
-          }
-
           // Cookie may not know the doc (fresh browser): find the one this
           // app created earlier, or create it.
-          let docId = session.docId ?? (await findDoc(accessToken)) ?? (await createDoc(accessToken));
+          let docId =
+            session.docId ??
+            (await findDoc(accessToken)) ??
+            (await createDoc(accessToken));
           try {
             await appendEntry(accessToken, docId, entry);
           } catch (err) {
             if (!(err instanceof DocNotFoundError)) throw err;
             // Stale id (doc deleted in Drive): rediscover or recreate, retry once.
-            docId = (await findDoc(accessToken)) ?? (await createDoc(accessToken));
+            docId =
+              (await findDoc(accessToken)) ?? (await createDoc(accessToken));
             await appendEntry(accessToken, docId, entry);
           }
 
@@ -220,64 +317,31 @@ export default {
         }
 
         case "GET /api/recent": {
-          const session = await getSession(request, env);
-          if (!session) return json({ error: "signin_required" }, 401);
+          const auth = await requireAuth(request, env);
+          if (auth instanceof Response) return auth;
+          const doc = await readUserDoc(auth.session, auth.accessToken);
+          if (!doc) return json({ entries: [], stats: null });
 
-          let accessToken: string;
-          try {
-            accessToken = await refreshAccessToken(env, session.refreshToken);
-          } catch (err) {
-            if (err instanceof ReconnectRequiredError) {
-              return json({ error: "reconnect_required" }, 409);
-            }
-            throw err;
-          }
-
-          const docId = session.docId ?? (await findDoc(accessToken));
-          if (!docId) return json({ entries: [], stats: null });
-          let docText: string;
-          try {
-            docText = await getDocText(accessToken, docId);
-          } catch (err) {
-            if (err instanceof DocNotFoundError) return json({ entries: [], stats: null });
-            throw err;
-          }
-
-          const entries = parseEntries(docText);
+          const entries = parseEntries(doc.text);
           if (entries.length === 0) return json({ entries: [], stats: null });
           const year = new Date().toISOString().slice(0, 4);
           const stats = {
             total: entries.length,
             thisYear: entries.filter((e) => e.date.startsWith(year)).length,
             avgRating:
-              Math.round((entries.reduce((s, e) => s + e.rating, 0) / entries.length) * 10) / 10,
+              Math.round(
+                (entries.reduce((s, e) => s + e.rating, 0) / entries.length) *
+                  10,
+              ) / 10,
           };
           return json({ entries, stats });
         }
 
         case "GET /api/export": {
-          const session = await getSession(request, env);
-          if (!session) return json({ error: "signin_required" }, 401);
-
-          let accessToken: string;
-          try {
-            accessToken = await refreshAccessToken(env, session.refreshToken);
-          } catch (err) {
-            if (err instanceof ReconnectRequiredError) {
-              return json({ error: "reconnect_required" }, 409);
-            }
-            throw err;
-          }
-
-          const docId = session.docId ?? (await findDoc(accessToken));
-          if (!docId) return json({ error: "no_doc" }, 404);
-          let log: string;
-          try {
-            log = (await getDocText(accessToken, docId)).trim();
-          } catch (err) {
-            if (err instanceof DocNotFoundError) return json({ error: "no_doc" }, 404);
-            throw err;
-          }
+          const auth = await requireAuth(request, env);
+          if (auth instanceof Response) return auth;
+          const doc = await readUserDoc(auth.session, auth.accessToken);
+          let log = doc?.text.trim() ?? "";
           if (!log) return json({ error: "no_doc" }, 404);
 
           // Keep the prompt pasteable: trim to the most recent entries.

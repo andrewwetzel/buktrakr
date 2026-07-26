@@ -3,6 +3,7 @@
 // drive.file lets the app write to the one doc it creates.
 
 import type { Env } from "./index";
+import { b64urlDecode } from "./session";
 
 // drive.file is non-sensitive: the app can only touch files it created,
 // and the consent screen can be published without Google verification.
@@ -26,7 +27,7 @@ export function buildAuthUrl(
   env: Env,
   redirectUri: string,
   state: string,
-  forceConsent: boolean
+  forceConsent: boolean,
 ): string {
   const params = new URLSearchParams({
     client_id: clientId(env),
@@ -50,7 +51,7 @@ interface TokenResponse {
 }
 
 async function tokenRequest(
-  params: Record<string, string>
+  params: Record<string, string>,
 ): Promise<{ status: number; body: TokenResponse }> {
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -64,17 +65,16 @@ async function tokenRequest(
 // its signature does not need to be re-verified here.
 function parseIdToken(idToken: string): IdClaims | null {
   try {
-    let b64 = idToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const pad = b64.length % 4;
-    if (pad) b64 += "=".repeat(4 - pad);
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const claims = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const payload = b64urlDecode(idToken.split(".")[1] ?? "");
+    const claims = JSON.parse(new TextDecoder().decode(payload)) as Record<
+      string,
+      unknown
+    >;
     if (typeof claims.sub !== "string" || !claims.sub) return null;
     return {
       sub: claims.sub,
-      email: typeof claims.email === "string" ? claims.email.toLowerCase() : null,
+      email:
+        typeof claims.email === "string" ? claims.email.toLowerCase() : null,
     };
   } catch {
     return null;
@@ -84,7 +84,7 @@ function parseIdToken(idToken: string): IdClaims | null {
 export async function exchangeCode(
   env: Env,
   redirectUri: string,
-  code: string
+  code: string,
 ): Promise<{ refreshToken: string | null; claims: IdClaims | null }> {
   const { status, body } = await tokenRequest({
     code,
@@ -94,7 +94,9 @@ export async function exchangeCode(
     grant_type: "authorization_code",
   });
   if (status !== 200 || !body.id_token) {
-    throw new Error(`Code exchange failed (${status}): ${body.error ?? "unknown"}`);
+    throw new Error(
+      `Code exchange failed (${status}): ${body.error ?? "unknown"}`,
+    );
   }
   return {
     refreshToken: body.refresh_token ?? null,
@@ -102,7 +104,10 @@ export async function exchangeCode(
   };
 }
 
-export async function refreshAccessToken(env: Env, refreshToken: string): Promise<string> {
+export async function refreshAccessToken(
+  env: Env,
+  refreshToken: string,
+): Promise<string> {
   const { status, body } = await tokenRequest({
     refresh_token: refreshToken,
     client_id: clientId(env),
@@ -113,7 +118,9 @@ export async function refreshAccessToken(env: Env, refreshToken: string): Promis
     throw new ReconnectRequiredError();
   }
   if (status !== 200 || !body.access_token) {
-    throw new Error(`Token refresh failed (${status}): ${body.error ?? "unknown"}`);
+    throw new Error(
+      `Token refresh failed (${status}): ${body.error ?? "unknown"}`,
+    );
   }
   return body.access_token;
 }
@@ -126,6 +133,6 @@ export async function revokeToken(token: string): Promise<void> {
       body: new URLSearchParams({ token }),
     });
   } catch {
-    // Best-effort: the KV record is cleared regardless.
+    // Best-effort: the session cookie is cleared regardless.
   }
 }

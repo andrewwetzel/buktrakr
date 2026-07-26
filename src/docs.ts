@@ -20,7 +20,10 @@ export interface Entry {
 }
 
 function authHeaders(accessToken: string): Record<string, string> {
-  return { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" };
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
 }
 
 export async function createDoc(accessToken: string): Promise<string> {
@@ -55,27 +58,56 @@ export async function findDoc(accessToken: string): Promise<string | null> {
     pageSize: "1",
     fields: "files(id)",
   });
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
-    headers: authHeaders(accessToken),
-  });
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?${params}`,
+    {
+      headers: authHeaders(accessToken),
+    },
+  );
   if (!res.ok) throw new Error(`Doc search failed: ${res.status}`);
   const body = (await res.json()) as { files?: { id?: string }[] };
   return body.files?.[0]?.id ?? null;
 }
 
-async function getEndIndex(accessToken: string, docId: string): Promise<number> {
+async function getEndState(
+  accessToken: string,
+  docId: string,
+): Promise<{ endIndex: number; revisionId: string }> {
   const res = await fetch(
-    `https://docs.googleapis.com/v1/documents/${docId}?fields=body(content(endIndex))`,
-    { headers: authHeaders(accessToken) }
+    `https://docs.googleapis.com/v1/documents/${docId}?fields=revisionId,body(content(endIndex))`,
+    { headers: authHeaders(accessToken) },
   );
   if (res.status === 404) throw new DocNotFoundError();
   if (!res.ok) throw new Error(`Doc fetch failed: ${res.status}`);
-  const body = (await res.json()) as { body?: { content?: { endIndex?: number }[] } };
+  const body = (await res.json()) as {
+    revisionId?: string;
+    body?: { content?: { endIndex?: number }[] };
+  };
   const content = body.body?.content ?? [];
   const end = content[content.length - 1]?.endIndex;
-  if (typeof end !== "number") throw new Error("Doc has no end index");
-  return end;
+  if (typeof end !== "number" || !body.revisionId)
+    throw new Error("Doc has no end state");
+  return { endIndex: end, revisionId: body.revisionId };
 }
+
+// ---- Meta-line format: a contract between the writer (appendEntry) and the
+// ---- reader (parseEntries). Change these together or old entries stop being
+// ---- counted by /api/recent.
+export const META_SEP = " · ";
+const metaLine = (e: Entry): string =>
+  [
+    `Rating: ${e.rating}/10`,
+    e.date,
+    ...(e.isbn ? [`ISBN ${e.isbn}`] : []),
+  ].join(META_SEP);
+const META_LINE_RE = new RegExp(
+  `^Rating: (\\d{1,2})/10${META_SEP}(\\d{4}-\\d{2}-\\d{2})`,
+);
+
+// A body line that happens to look like a meta line would forge a phantom
+// entry in parseEntries; an invisible zero-width space breaks the match.
+const neutralizeMetaLookalikes = (s: string): string =>
+  s.replace(/^(\s*Rating: \d{1,2}\/10)/gm, "\u200B$1");
 
 const clean = (s: string): string =>
   s.replace(/\r/g, "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
@@ -85,24 +117,51 @@ const clean = (s: string): string =>
  * requests over sub-ranges computed locally. Offsets are UTF-16 code units
  * (JS string.length), which is exactly how the Docs API indexes text.
  */
-export async function appendEntry(accessToken: string, docId: string, entry: Entry): Promise<void> {
-  // The body's final newline cannot be inserted at/after, hence -1.
-  const insertAt = (await getEndIndex(accessToken, docId)) - 1;
+export async function appendEntry(
+  accessToken: string,
+  docId: string,
+  entry: Entry,
+): Promise<void> {
+  // The read-then-write pair races with concurrent edits to the doc, so the
+  // batch carries writeControl.requiredRevisionId and gets one retry.
+  for (let attempt = 0; ; attempt++) {
+    const { endIndex, revisionId } = await getEndState(accessToken, docId);
+    const done = await tryAppendAt(
+      accessToken,
+      docId,
+      entry,
+      endIndex - 1,
+      revisionId,
+    );
+    if (done) return;
+    if (attempt >= 1) throw new Error("Doc append failed: revision conflict");
+  }
+}
 
-  const meta = [`Rating: ${entry.rating}/10`, entry.date];
-  if (entry.isbn) meta.push(`ISBN ${entry.isbn}`);
+/** One append attempt; returns false on a revision/index conflict (retryable). */
+async function tryAppendAt(
+  accessToken: string,
+  docId: string,
+  entry: Entry,
+  insertAt: number,
+  revisionId: string,
+): Promise<boolean> {
+  const body = (s: string): string => neutralizeMetaLookalikes(clean(s)) || "—";
   const hasCover = Boolean(entry.coverUrl);
-  const parts: { text: string; kind: "title" | "cover" | "meta" | "label" | "body" }[] = [
+  const parts: {
+    text: string;
+    kind: "title" | "cover" | "meta" | "label" | "body";
+  }[] = [
     { text: clean(`${entry.title} — ${entry.author}`), kind: "title" },
     // Empty paragraph reserved for the inline cover image.
     ...(hasCover ? [{ text: "", kind: "cover" as const }] : []),
-    { text: meta.join(" · "), kind: "meta" },
+    { text: metaLine(entry), kind: "meta" },
     { text: "The Good", kind: "label" },
-    { text: clean(entry.liked.trim()) || "—", kind: "body" },
+    { text: body(entry.liked), kind: "body" },
     { text: "The Bad", kind: "label" },
-    { text: clean(entry.disliked.trim()) || "—", kind: "body" },
+    { text: body(entry.disliked), kind: "body" },
     { text: "The Other", kind: "label" },
-    { text: clean(entry.notes.trim()) || "—", kind: "body" },
+    { text: body(entry.notes), kind: "body" },
   ];
 
   let text = "";
@@ -115,9 +174,11 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
     });
     text += part.text + "\n";
   }
-  const titleR = ranges[0];
-  const metaR = ranges.find((r) => r.kind === "meta")!;
-  const coverR = ranges.find((r) => r.kind === "cover");
+  // title and meta always exist in parts; cover is conditional.
+  const rangeOf = (kind: string) => ranges.find((r) => r.kind === kind);
+  const titleR = rangeOf("title")!;
+  const metaR = rangeOf("meta")!;
+  const coverR = rangeOf("cover");
   const labelRs = ranges.filter((r) => r.kind === "label");
   const blockEnd = insertAt + text.length;
 
@@ -154,38 +215,50 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
     })),
   ];
 
-  const res = await fetch(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
-    method: "POST",
-    headers: authHeaders(accessToken),
-    body: JSON.stringify({ requests }),
-  });
+  const res = await fetch(
+    `https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`,
+    {
+      method: "POST",
+      headers: authHeaders(accessToken),
+      body: JSON.stringify({
+        requests,
+        writeControl: { requiredRevisionId: revisionId },
+      }),
+    },
+  );
   if (res.status === 404) throw new DocNotFoundError();
-  if (!res.ok) throw new Error(`Doc append failed: ${res.status} ${await res.text()}`);
+  if (res.status === 400) return false; // stale revision or index — caller retries once
+  if (!res.ok)
+    throw new Error(`Doc append failed: ${res.status} ${await res.text()}`);
 
   // The cover goes in a separate batch: Google fetches the image URL
   // server-side and can refuse (stale link, size), and that must never cost
   // the user their review text — so failures here are swallowed.
   if (coverR) {
     try {
-      await fetch(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
-        method: "POST",
-        headers: authHeaders(accessToken),
-        body: JSON.stringify({
-          requests: [
-            {
-              insertInlineImage: {
-                location: { index: coverR.start },
-                uri: entry.coverUrl,
-                objectSize: { height: { magnitude: 120, unit: "PT" } },
+      await fetch(
+        `https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`,
+        {
+          method: "POST",
+          headers: authHeaders(accessToken),
+          body: JSON.stringify({
+            requests: [
+              {
+                insertInlineImage: {
+                  location: { index: coverR.start },
+                  uri: entry.coverUrl,
+                  objectSize: { height: { magnitude: 120, unit: "PT" } },
+                },
               },
-            },
-          ],
-        }),
-      });
+            ],
+          }),
+        },
+      );
     } catch {
       // Best-effort only.
     }
   }
+  return true;
 }
 
 export interface ParsedEntry {
@@ -204,7 +277,7 @@ export function parseEntries(text: string): ParsedEntry[] {
   const lines = text.split("\n");
   const entries: ParsedEntry[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^Rating: (\d{1,2})\/10 · (\d{4}-\d{2}-\d{2})/);
+    const m = lines[i].match(META_LINE_RE);
     if (!m) continue;
     let j = i - 1;
     while (j >= 0 && !lines[j].trim()) j--;
@@ -222,15 +295,22 @@ export function parseEntries(text: string): ParsedEntry[] {
 }
 
 /** Full plain text of the doc (for the AI-recommendations export). */
-export async function getDocText(accessToken: string, docId: string): Promise<string> {
+export async function getDocText(
+  accessToken: string,
+  docId: string,
+): Promise<string> {
   const res = await fetch(
     `https://docs.googleapis.com/v1/documents/${docId}?fields=body(content(paragraph(elements(textRun(content)))))`,
-    { headers: authHeaders(accessToken) }
+    { headers: authHeaders(accessToken) },
   );
   if (res.status === 404) throw new DocNotFoundError();
   if (!res.ok) throw new Error(`Doc read failed: ${res.status}`);
   const body = (await res.json()) as {
-    body?: { content?: { paragraph?: { elements?: { textRun?: { content?: string } }[] } }[] };
+    body?: {
+      content?: {
+        paragraph?: { elements?: { textRun?: { content?: string } }[] };
+      }[];
+    };
   };
   let text = "";
   for (const el of body.body?.content ?? []) {

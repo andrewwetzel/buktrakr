@@ -4,5 +4,5 @@
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
 
-# Signs session cookies. Any long random string, e.g. `openssl rand -base64 32`.
+# Encrypts session cookies. Any long random string, e.g. `openssl rand -base64 32`.
 SESSION_SECRET=local-dev-secret-change-me

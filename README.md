@@ -6,7 +6,7 @@ entry is appended to a Google Doc **in your own Google Drive** — the app
 creates a "BukTrakr — Book Reviews" doc for you on your first entry and only
 ever touches that one doc.
 
-Anyone can use a hosted instance: Google sign-in *is* the login, and every
+Anyone can use a hosted instance: Google sign-in _is_ the login, and every
 user's reviews go to their own doc in their own Drive. The server stores
 **nothing** — no database, no user table. Your Google token travels only in
 your own browser's encrypted cookie.
@@ -73,8 +73,10 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
   the existing doc — no duplicates — creating it only if none exists.
 - **Book autocomplete**: typing a title searches the Google Books API from
   the browser (falling back to Open Library), and picking a suggestion fills
-  the title, author, ISBN, and cover. The cover is embedded in the doc entry
-  (cover URLs are validated server-side against the two book APIs' hosts).
+  the title, author, ISBN, and cover. The cover is embedded in the doc entry;
+  cover URLs are validated server-side against the book APIs' image hosts
+  (books.google.com, covers.openlibrary.org, and Google's
+  *.googleusercontent.com / *.gstatic.com image CDNs).
 - **AI recommendations export**: "Copy AI prompt" reads your whole reviews
   doc back and copies it wrapped in a ready-made prompt, so you can paste it
   into any AI chat and get book suggestions matched to your tastes.
@@ -101,8 +103,10 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
   which re-runs the OAuth flow with `prompt=consent`.
 - **User deletes the doc in Drive**: the next submission gets a 404 from the
   Docs API; the Worker rediscovers or recreates the doc and retries once.
-- **Sign out** clears the session cookie. **Disconnect** additionally
-  revokes the app's Google access.
+- **Sign out** clears the session cookie in that browser only — by design
+  there is no server-side session store to invalidate. **Disconnect** is the
+  real revocation: it invalidates the Google refresh token itself, killing
+  any copy of the cookie everywhere.
 
 ## Protecting a public instance
 
@@ -113,6 +117,18 @@ worth adding one Cloudflare rate-limiting rule (free plan includes one):
 `/api/` or `/auth/`, 30 requests per minute per IP, action Block. That caps
 abuse of the OAuth redirect and API endpoints without affecting normal use.
 Turnstile/CAPTCHA would be overkill here — there's nothing to farm.
+
+## Tests and CI
+
+`npm test` runs the vitest suite (doc-text parser, session-token round-trip
+and tamper cases, entry validation including the cover-URL allowlist, and
+network-free handler smoke tests). `npm run typecheck` and
+`npm run format:check` (prettier) round it out; `.github/workflows/ci.yml`
+runs all three on every push and PR.
+
+Cloudflare deploys `main` on push regardless of CI. To make bad pushes
+undeployable, set the Worker's **build command** (Settings → Build) to
+`npm ci && npm run typecheck && npm test` — a failing build never deploys.
 
 ## Local development
 
@@ -136,4 +152,9 @@ against the real Google APIs.
 4. `curl -X POST https://YOUR-HOSTNAME/api/entries -d '{}'` with no cookie
    → `401` (the API requires a valid encrypted session).
 5. Sign in from a different browser (fresh cookies) and submit → the entry
-   lands in the *same* doc, not a duplicate.
+   lands in the _same_ doc, not a duplicate.
+
+## Contributing
+
+PRs welcome — run `npm run typecheck`, `npm test`, and `npm run format`
+before opening one.

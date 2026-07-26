@@ -19,7 +19,7 @@ function b64urlEncode(bytes: Uint8Array): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function b64urlDecode(s: string): Uint8Array {
+export function b64urlDecode(s: string): Uint8Array {
   let b64 = s.replace(/-/g, "+").replace(/_/g, "/");
   const pad = b64.length % 4;
   if (pad) b64 += "=".repeat(4 - pad);
@@ -31,29 +31,35 @@ function b64urlDecode(s: string): Uint8Array {
 
 async function aesKey(secret: string): Promise<CryptoKey> {
   const digest = await crypto.subtle.digest("SHA-256", enc.encode(secret));
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function createSessionToken(
   secret: string,
   data: SessionData,
-  ttlSeconds: number
+  ttlSeconds: number,
 ): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const plaintext = enc.encode(
-    JSON.stringify({ ...data, exp: Math.floor(Date.now() / 1000) + ttlSeconds })
+    JSON.stringify({
+      ...data,
+      exp: Math.floor(Date.now() / 1000) + ttlSeconds,
+    }),
   );
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     await aesKey(secret),
-    plaintext
+    plaintext,
   );
   return `${b64urlEncode(iv)}.${b64urlEncode(new Uint8Array(ciphertext))}`;
 }
 
 export async function verifySessionToken(
   secret: string,
-  token: string
+  token: string,
 ): Promise<SessionData | null> {
   const [ivPart, ctPart] = token.split(".");
   if (!ivPart || !ctPart) return null;
@@ -61,12 +67,18 @@ export async function verifySessionToken(
     const plaintext = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv: b64urlDecode(ivPart) },
       await aesKey(secret),
-      b64urlDecode(ctPart)
+      b64urlDecode(ctPart),
     );
-    const data = JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, unknown>;
-    if (typeof data.exp !== "number" || data.exp < Date.now() / 1000) return null;
-    if (typeof data.sub !== "string" || typeof data.email !== "string") return null;
-    if (typeof data.refreshToken !== "string" || !data.refreshToken) return null;
+    const data = JSON.parse(new TextDecoder().decode(plaintext)) as Record<
+      string,
+      unknown
+    >;
+    if (typeof data.exp !== "number" || data.exp < Date.now() / 1000)
+      return null;
+    if (typeof data.sub !== "string" || typeof data.email !== "string")
+      return null;
+    if (typeof data.refreshToken !== "string" || !data.refreshToken)
+      return null;
     return {
       sub: data.sub,
       email: data.email,

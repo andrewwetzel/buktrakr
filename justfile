@@ -20,6 +20,14 @@ dev:
 check:
     npm run typecheck
 
+# Run the test suite
+test:
+    npm test
+
+# Format the codebase with prettier
+fmt:
+    npm run format
+
 # Deploy manually (normally unnecessary — pushing to main auto-deploys)
 deploy:
     npx wrangler deploy

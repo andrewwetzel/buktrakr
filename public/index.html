@@ -1,601 +1,810 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BukTrakr</title>
-  <meta name="description" content="Log books you've read — rating, the good, the bad — straight into a Google Doc in your own Drive.">
-  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#1d1b17" media="(prefers-color-scheme: dark)">
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
-  <link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192">
-  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="BukTrakr">
-  <meta property="og:title" content="BukTrakr">
-  <meta property="og:description" content="Log books you've read into a Google Doc in your own Drive — every user gets their own doc.">
-  <meta property="og:type" content="website">
-  <meta property="og:image" content="/icons/icon-512.png">
-  <meta name="twitter:card" content="summary">
-  <style>
-    :root {
-      --bg: #f6f4ef;
-      --card: #ffffff;
-      --ink: #2b2620;
-      --muted: #7a7266;
-      --accent: #3b6e4f;
-      --accent-ink: #ffffff;
-      --line: #e4dfd5;
-      --danger: #a04030;
-    }
-    @media (prefers-color-scheme: dark) {
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BukTrakr</title>
+    <meta
+      name="description"
+      content="Log books you've read — rating, the good, the bad — straight into a Google Doc in your own Drive."
+    />
+    <meta
+      name="theme-color"
+      content="#f6f4ef"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#1d1b17"
+      media="(prefers-color-scheme: dark)"
+    />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link
+      rel="icon"
+      href="/icons/icon-192.png"
+      type="image/png"
+      sizes="192x192"
+    />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="BukTrakr" />
+    <meta property="og:title" content="BukTrakr" />
+    <meta
+      property="og:description"
+      content="Log books you've read into a Google Doc in your own Drive — every user gets their own doc."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/icons/icon-512.png" />
+    <meta name="twitter:card" content="summary" />
+    <style>
       :root {
-        --bg: #1d1b17;
-        --card: #26231e;
-        --ink: #ece7dd;
-        --muted: #a29a8c;
-        --accent: #6fae8a;
-        --accent-ink: #14211a;
-        --line: #3a352d;
-        --danger: #e08874;
+        --bg: #f6f4ef;
+        --card: #ffffff;
+        --ink: #2b2620;
+        --muted: #7a7266;
+        --accent: #3b6e4f;
+        --accent-ink: #ffffff;
+        --line: #e4dfd5;
+        --danger: #a04030;
       }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Georgia, "Times New Roman", serif;
-      background: var(--bg);
-      color: var(--ink);
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      padding: 2rem 1rem;
-    }
-    main { width: 100%; max-width: 34rem; }
-    h1 { font-size: 1.7rem; margin: 0 0 0.25rem; }
-    .tagline { color: var(--muted); margin: 0 0 1.5rem; font-style: italic; }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 1.25rem;
-      margin-bottom: 1rem;
-    }
-    .row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
-    .who { color: var(--muted); font-size: 0.9rem; }
-    a { color: var(--accent); }
-    p { margin: 0 0 1rem; }
-    label { display: block; font-weight: bold; margin: 0.9rem 0 0.3rem; font-size: 0.95rem; }
-    label:first-child { margin-top: 0; }
-    input, select, textarea {
-      width: 100%;
-      font: inherit;
-      color: inherit;
-      background: var(--bg);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 0.55rem 0.65rem;
-    }
-    textarea { min-height: 6rem; resize: vertical; }
-    input[type="range"] {
-      padding: 0;
-      border: none;
-      background: none;
-      accent-color: var(--accent);
-      cursor: pointer;
-    }
-    #rating-value { color: var(--accent); }
-    .optional { font-weight: normal; color: var(--muted); font-size: 0.85rem; }
-    .lookup { position: relative; }
-    .suggestions {
-      position: absolute;
-      top: calc(100% + 2px);
-      left: 0;
-      right: 0;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-      max-height: 17rem;
-      overflow-y: auto;
-      z-index: 10;
-    }
-    .suggestions button {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      width: 100%;
-      text-align: left;
-      background: none;
-      color: var(--ink);
-      border: none;
-      border-radius: 0;
-      padding: 0.55rem 0.65rem;
-    }
-    .suggestions button:hover, .suggestions button:focus {
-      background: var(--bg);
-    }
-    .suggestions img {
-      width: 2rem;
-      height: 3rem;
-      object-fit: cover;
-      border-radius: 3px;
-      flex: none;
-      background: var(--bg);
-    }
-    .suggestions .s-meta { display: block; color: var(--muted); font-size: 0.85rem; }
-    .suggestions button.active { background: var(--bg); }
-    .hint { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; font-style: italic; }
-    #recent-list { list-style: none; margin: 0.6rem 0 0; padding: 0; }
-    #recent-list li {
-      padding: 0.4rem 0;
-      border-top: 1px solid var(--line);
-      font-size: 0.95rem;
-      display: flex;
-      justify-content: space-between;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-    }
-    #recent-list li:first-child { border-top: none; }
-    #recent-list .s-meta { flex: none; }
-    button {
-      font: inherit;
-      border: none;
-      border-radius: 6px;
-      padding: 0.6rem 1.1rem;
-      cursor: pointer;
-      background: var(--accent);
-      color: var(--accent-ink);
-    }
-    button.subtle {
-      background: none;
-      color: var(--muted);
-      text-decoration: underline;
-      padding: 0.25rem;
-    }
-    .actions { margin-top: 1.2rem; display: flex; align-items: center; gap: 1rem; }
-    #message { margin-top: 0.9rem; font-size: 0.95rem; }
-    #message.error { color: var(--danger); }
-    #message.ok { color: var(--accent); }
-    .hidden { display: none; }
-    footer { color: var(--muted); font-size: 0.8rem; margin-top: 1.5rem; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>BukTrakr</h1>
-    <p class="tagline">What did you just read?</p>
-
-    <div class="card hidden" id="signin-card">
-      <p>Sign in with Google and every book you log is appended to a
-        "BukTrakr — Book Reviews" doc in <em>your own</em> Google Drive.
-        The app can only touch that one doc it creates — nothing else.</p>
-      <button id="signin">Sign in with Google</button>
-      <div id="signin-message"></div>
-    </div>
-
-    <div class="card hidden" id="reconnect-card">
-      <p>Your Google connection needs to be renewed before entries can be
-        saved.</p>
-      <button id="reconnect">Reconnect Google</button>
-    </div>
-
-    <div class="card hidden" id="status">
-      <div class="row">
-        <span class="who" id="who"></span>
-        <span>
-          <a id="doc-link" target="_blank" rel="noopener" class="hidden">Open reviews doc</a>
-          <button class="subtle" id="export" title="Copy your reading log as a prompt for any AI chat">Copy AI prompt</button>
-          <button class="subtle" id="signout">Sign out</button>
-        </span>
-      </div>
-    </div>
-
-    <form class="card hidden" id="entry-form">
-      <label for="title">Book title</label>
-      <div class="lookup">
-        <input id="title" name="title" required maxlength="500" autocomplete="off"
-               placeholder="Start typing to search books…" role="combobox"
-               aria-expanded="false" aria-controls="suggestions">
-        <div id="suggestions" class="suggestions hidden" role="listbox"></div>
-      </div>
-      <div id="dup-hint" class="hint hidden"></div>
-
-      <label for="author">Author</label>
-      <input id="author" name="author" required maxlength="500" autocomplete="off">
-
-      <label for="isbn">ISBN <span class="optional">(auto-filled, optional)</span></label>
-      <input id="isbn" name="isbn" maxlength="32" autocomplete="off">
-
-      <input type="hidden" id="coverUrl" name="coverUrl" value="">
-
-      <label for="rating">Rating: <span id="rating-value">5</span>/10 — <span id="rating-mood">fine</span></label>
-      <input type="range" id="rating" name="rating" min="1" max="10" step="1" value="5">
-
-      <label for="entryDate">Date read <span class="optional">(defaults to today)</span></label>
-      <input type="date" id="entryDate" name="date">
-
-      <label for="liked">The Good</label>
-      <textarea id="liked" name="liked" maxlength="5000" placeholder="What worked for you"></textarea>
-
-      <label for="disliked">The Bad</label>
-      <textarea id="disliked" name="disliked" maxlength="5000" placeholder="What didn't"></textarea>
-
-      <label for="notes">The Other</label>
-      <textarea id="notes" name="notes" maxlength="5000" placeholder="Anything else worth remembering"></textarea>
-
-      <div class="actions">
-        <button type="submit" id="submit">Add to my doc</button>
-      </div>
-      <div id="message"></div>
-    </form>
-
-    <div class="card hidden" id="recent-card">
-      <div class="row">
-        <strong>Recently logged</strong>
-        <span class="who" id="stats"></span>
-      </div>
-      <ul id="recent-list"></ul>
-    </div>
-
-    <footer>Nothing is stored on the server. Your Google connection lives in an
-      encrypted cookie in this browser, and the app can only touch the one doc
-      it creates in your Drive. Book search powered by the Google Books API.</footer>
-  </main>
-
-  <script>
-    const $ = (id) => document.getElementById(id);
-    const show = (el, on) => el.classList.toggle("hidden", !on);
-
-    const MOODS = ["dreadful", "bad", "rough", "meh", "fine", "decent", "good", "great", "superb", "masterpiece"];
-    function updateRating() {
-      const v = Number($("rating").value);
-      $("rating-value").textContent = String(v);
-      $("rating-mood").textContent = MOODS[v - 1];
-    }
-    $("rating").addEventListener("input", updateRating);
-    updateRating();
-
-    // Local today as YYYY-MM-DD; defaultValue survives form.reset().
-    const today = new Date();
-    $("entryDate").defaultValue = [
-      today.getFullYear(),
-      String(today.getMonth() + 1).padStart(2, "0"),
-      String(today.getDate()).padStart(2, "0"),
-    ].join("-");
-    $("entryDate").max = $("entryDate").defaultValue;
-
-    // --- Book autocomplete via the Google Books API (keyless, CORS-open) ---
-    let searchTimer = null;
-    let searchAbort = null;
-
-    let activeIndex = -1;
-
-    function hideSuggestions() {
-      show($("suggestions"), false);
-      $("title").setAttribute("aria-expanded", "false");
-      $("title").removeAttribute("aria-activedescendant");
-      activeIndex = -1;
-    }
-
-    function setActive(i) {
-      const opts = $("suggestions").querySelectorAll("button");
-      if (!opts.length) return;
-      activeIndex = (i + opts.length) % opts.length;
-      opts.forEach((o, idx) => o.classList.toggle("active", idx === activeIndex));
-      opts[activeIndex].scrollIntoView({ block: "nearest" });
-      $("title").setAttribute("aria-activedescendant", opts[activeIndex].id);
-    }
-
-    // Normalized suggestion shape: { title, authors, year, isbn, cover }
-    function renderSuggestions(books) {
-      const box = $("suggestions");
-      box.textContent = "";
-      activeIndex = -1;
-      books.forEach((b, idx) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.id = `sugg-${idx}`;
-        btn.setAttribute("role", "option");
-        if (b.cover) {
-          const img = document.createElement("img");
-          img.src = b.cover;
-          img.alt = "";
-          img.loading = "lazy";
-          btn.append(img);
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1d1b17;
+          --card: #26231e;
+          --ink: #ece7dd;
+          --muted: #a29a8c;
+          --accent: #6fae8a;
+          --accent-ink: #14211a;
+          --line: #3a352d;
+          --danger: #e08874;
         }
-        const txt = document.createElement("span");
-        txt.textContent = b.title;
-        const meta = document.createElement("span");
-        meta.className = "s-meta";
-        meta.textContent = [b.authors, b.year].filter(Boolean).join(" · ") || "Unknown author";
-        txt.append(meta);
-        btn.append(txt);
-        btn.addEventListener("click", () => {
-          $("title").value = b.title;
-          $("author").value = b.authors;
-          $("isbn").value = b.isbn;
-          $("coverUrl").value = b.cover;
-          hideSuggestions();
-          checkDuplicate();
-          $("rating").focus();
-        });
-        box.append(btn);
-      });
-      show(box, books.length > 0);
-      $("title").setAttribute("aria-expanded", String(books.length > 0));
-    }
-
-    async function searchGoogleBooks(q, signal) {
-      const params = new URLSearchParams({
-        q,
-        maxResults: "6",
-        printType: "books",
-        fields: "items(volumeInfo(title,authors,publishedDate,industryIdentifiers,imageLinks))",
-      });
-      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?${params}`, { signal });
-      if (!res.ok) throw new Error(String(res.status));
-      const data = await res.json();
-      return (data.items || [])
-        .map((i) => i.volumeInfo)
-        .filter((v) => v && v.title)
-        .map((v) => {
-          const ids = Array.isArray(v.industryIdentifiers) ? v.industryIdentifiers : [];
-          const by = (t) => ids.find((i) => i && i.type === t)?.identifier;
-          return {
-            title: v.title,
-            authors: (v.authors || []).join(", "),
-            year: (v.publishedDate || "").slice(0, 4),
-            isbn: by("ISBN_13") || by("ISBN_10") || "",
-            cover: (v.imageLinks?.thumbnail || "").replace(/^http:/, "https:"),
-          };
-        });
-    }
-
-    async function searchOpenLibrary(q, signal) {
-      const params = new URLSearchParams({
-        q,
-        limit: "6",
-        fields: "title,author_name,first_publish_year,isbn,cover_i",
-      });
-      const res = await fetch(`https://openlibrary.org/search.json?${params}`, { signal });
-      if (!res.ok) throw new Error(String(res.status));
-      const data = await res.json();
-      return (data.docs || [])
-        .filter((d) => d && d.title)
-        .map((d) => {
-          const isbns = Array.isArray(d.isbn) ? d.isbn : [];
-          const isbn13 = isbns.find((i) => i.length === 13 && /^97[89]/.test(i));
-          return {
-            title: d.title,
-            authors: (d.author_name || []).join(", "),
-            year: d.first_publish_year ? String(d.first_publish_year) : "",
-            isbn: isbn13 || isbns[0] || "",
-            cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : "",
-          };
-        });
-    }
-
-    async function searchBooks(q) {
-      if (searchAbort) searchAbort.abort();
-      searchAbort = new AbortController();
-      const signal = searchAbort.signal;
-      try {
-        let books = [];
-        try {
-          books = await searchGoogleBooks(q, signal);
-        } catch (err) {
-          if (signal.aborted) return;
-          // Google Books keyless quota is per-IP and can run out; Open
-          // Library covers the gap.
-          books = await searchOpenLibrary(q, signal);
-        }
-        if (!signal.aborted) renderSuggestions(books);
-      } catch {
-        // Aborted or offline — autocomplete is best-effort; typing still works.
       }
-    }
-
-    $("title").addEventListener("input", () => {
-      clearTimeout(searchTimer);
-      $("coverUrl").value = ""; // manual edits invalidate the picked cover
-      checkDuplicate();
-      const q = $("title").value.trim();
-      if (q.length < 3) {
-        hideSuggestions();
-        return;
+      * {
+        box-sizing: border-box;
       }
-      searchTimer = setTimeout(() => searchBooks(q), 300);
-    });
-    $("title").addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        hideSuggestions();
-        return;
+      body {
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        background: var(--bg);
+        color: var(--ink);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 2rem 1rem;
       }
-      if ($("suggestions").classList.contains("hidden")) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActive(activeIndex + 1);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActive(activeIndex - 1);
-      } else if (e.key === "Enter" && activeIndex >= 0) {
-        e.preventDefault();
-        $("suggestions").querySelectorAll("button")[activeIndex].click();
+      main {
+        width: 100%;
+        max-width: 34rem;
       }
-    });
-    document.addEventListener("click", (e) => {
-      if (!e.target.closest(".lookup")) hideSuggestions();
-    });
+      h1 {
+        font-size: 1.7rem;
+        margin: 0 0 0.25rem;
+      }
+      .tagline {
+        color: var(--muted);
+        margin: 0 0 1.5rem;
+        font-style: italic;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      .who {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      a {
+        color: var(--accent);
+      }
+      p {
+        margin: 0 0 1rem;
+      }
+      label {
+        display: block;
+        font-weight: bold;
+        margin: 0.9rem 0 0.3rem;
+        font-size: 0.95rem;
+      }
+      label:first-child {
+        margin-top: 0;
+      }
+      input,
+      select,
+      textarea {
+        width: 100%;
+        font: inherit;
+        color: inherit;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0.55rem 0.65rem;
+      }
+      textarea {
+        min-height: 6rem;
+        resize: vertical;
+      }
+      input[type="range"] {
+        padding: 0;
+        border: none;
+        background: none;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      #rating-value {
+        color: var(--accent);
+      }
+      .optional {
+        font-weight: normal;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .lookup {
+        position: relative;
+      }
+      .suggestions {
+        position: absolute;
+        top: calc(100% + 2px);
+        left: 0;
+        right: 0;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+        max-height: 17rem;
+        overflow-y: auto;
+        z-index: 10;
+      }
+      .suggestions button {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        width: 100%;
+        text-align: left;
+        background: none;
+        color: var(--ink);
+        border: none;
+        border-radius: 0;
+        padding: 0.55rem 0.65rem;
+      }
+      .suggestions button:hover,
+      .suggestions button:focus,
+      .suggestions button.active {
+        background: var(--bg);
+      }
+      .suggestions img {
+        width: 2rem;
+        height: 3rem;
+        object-fit: cover;
+        border-radius: 3px;
+        flex: none;
+        background: var(--bg);
+      }
+      .suggestions .s-meta {
+        display: block;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-top: 0.35rem;
+        font-style: italic;
+      }
+      #recent-list {
+        list-style: none;
+        margin: 0.6rem 0 0;
+        padding: 0;
+      }
+      #recent-list li {
+        padding: 0.4rem 0;
+        border-top: 1px solid var(--line);
+        font-size: 0.95rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      #recent-list li:first-child {
+        border-top: none;
+      }
+      #recent-list .s-meta {
+        flex: none;
+      }
+      button {
+        font: inherit;
+        border: none;
+        border-radius: 6px;
+        padding: 0.6rem 1.1rem;
+        cursor: pointer;
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+      button.subtle {
+        background: none;
+        color: var(--muted);
+        text-decoration: underline;
+        padding: 0.25rem;
+      }
+      .actions {
+        margin-top: 1.2rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+      }
+      #message,
+      #signin-message {
+        margin-top: 0.9rem;
+        font-size: 0.95rem;
+      }
+      .error {
+        color: var(--danger);
+      }
+      .ok {
+        color: var(--accent);
+      }
+      .hidden {
+        display: none;
+      }
+      footer {
+        color: var(--muted);
+        font-size: 0.8rem;
+        margin-top: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>BukTrakr</h1>
+      <p class="tagline">What did you just read?</p>
 
-    function setMessage(text, kind) {
-      const el = $("message");
-      el.textContent = text;
-      el.className = kind || "";
-    }
+      <div class="card hidden" id="signin-card">
+        <p>
+          Sign in with Google and every book you log is appended to a "BukTrakr
+          — Book Reviews" doc in <em>your own</em> Google Drive. The app can
+          only touch that one doc it creates — nothing else.
+        </p>
+        <button id="signin">Sign in with Google</button>
+        <div id="signin-message"></div>
+      </div>
 
-    let allEntries = [];
-    let uiState = "signedOut";
+      <div class="card hidden" id="reconnect-card">
+        <p>
+          Your Google connection needs to be renewed before entries can be
+          saved.
+        </p>
+        <button id="reconnect">Reconnect Google</button>
+      </div>
 
-    function render(state) {
-      uiState = state;
-      show($("signin-card"), state === "signedOut");
-      show($("reconnect-card"), state === "reconnect");
-      show($("status"), state !== "signedOut");
-      show($("entry-form"), state === "ready");
-      show($("recent-card"), state === "ready" && allEntries.length > 0);
-    }
+      <div class="card hidden" id="status">
+        <div class="row">
+          <span class="who" id="who"></span>
+          <span>
+            <a id="doc-link" target="_blank" rel="noopener" class="hidden"
+              >Open reviews doc</a
+            >
+            <button
+              class="subtle"
+              id="export"
+              title="Copy your reading log as a prompt for any AI chat"
+            >
+              Copy AI prompt
+            </button>
+            <button class="subtle" id="signout">Sign out</button>
+          </span>
+        </div>
+      </div>
 
-    function fmtDate(iso) {
-      return new Date(iso + "T00:00:00Z").toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      });
-    }
+      <form class="card hidden" id="entry-form">
+        <label for="title">Book title</label>
+        <div class="lookup">
+          <input
+            id="title"
+            name="title"
+            required
+            maxlength="500"
+            autocomplete="off"
+            placeholder="Start typing to search books…"
+            role="combobox"
+            aria-expanded="false"
+            aria-controls="suggestions"
+          />
+          <div id="suggestions" class="suggestions hidden" role="listbox"></div>
+        </div>
+        <div id="dup-hint" class="hint hidden"></div>
 
-    async function loadRecent() {
-      try {
-        const res = await fetch("/api/recent");
-        if (!res.ok) return;
-        const data = await res.json();
-        allEntries = data.entries || [];
-        const list = $("recent-list");
-        list.textContent = "";
-        for (const e of allEntries.slice(-5).reverse()) {
-          const li = document.createElement("li");
-          const name = document.createElement("span");
-          name.textContent = e.author ? `${e.title} — ${e.author}` : e.title;
+        <label for="author">Author</label>
+        <input
+          id="author"
+          name="author"
+          required
+          maxlength="500"
+          autocomplete="off"
+        />
+
+        <label for="isbn"
+          >ISBN <span class="optional">(auto-filled, optional)</span></label
+        >
+        <input id="isbn" name="isbn" maxlength="32" autocomplete="off" />
+
+        <input type="hidden" id="coverUrl" name="coverUrl" value="" />
+
+        <label for="rating"
+          >Rating: <span id="rating-value">5</span>/10 —
+          <span id="rating-mood">fine</span></label
+        >
+        <input
+          type="range"
+          id="rating"
+          name="rating"
+          min="1"
+          max="10"
+          step="1"
+          value="5"
+        />
+
+        <label for="entryDate"
+          >Date read <span class="optional">(defaults to today)</span></label
+        >
+        <input type="date" id="entryDate" name="date" />
+
+        <label for="liked">The Good</label>
+        <textarea
+          id="liked"
+          name="liked"
+          maxlength="5000"
+          placeholder="What worked for you"
+        ></textarea>
+
+        <label for="disliked">The Bad</label>
+        <textarea
+          id="disliked"
+          name="disliked"
+          maxlength="5000"
+          placeholder="What didn't"
+        ></textarea>
+
+        <label for="notes">The Other</label>
+        <textarea
+          id="notes"
+          name="notes"
+          maxlength="5000"
+          placeholder="Anything else worth remembering"
+        ></textarea>
+
+        <div class="actions">
+          <button type="submit" id="submit">Add to my doc</button>
+        </div>
+        <div id="message"></div>
+      </form>
+
+      <div class="card hidden" id="recent-card">
+        <div class="row">
+          <strong>Recently logged</strong>
+          <span class="who" id="stats"></span>
+        </div>
+        <ul id="recent-list"></ul>
+      </div>
+
+      <footer>
+        Nothing is stored on the server. Your Google connection lives in an
+        encrypted cookie in this browser, and the app can only touch the one doc
+        it creates in your Drive. Book search powered by the Google Books API.
+      </footer>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const show = (el, on) => el.classList.toggle("hidden", !on);
+
+      const MOODS = [
+        "dreadful",
+        "bad",
+        "rough",
+        "meh",
+        "fine",
+        "decent",
+        "good",
+        "great",
+        "superb",
+        "masterpiece",
+      ];
+      function updateRating() {
+        const v = Number($("rating").value);
+        $("rating-value").textContent = String(v);
+        $("rating-mood").textContent = MOODS[v - 1];
+      }
+      $("rating").addEventListener("input", updateRating);
+      updateRating();
+
+      // Local today as YYYY-MM-DD; defaultValue survives form.reset().
+      const today = new Date();
+      $("entryDate").defaultValue = [
+        today.getFullYear(),
+        String(today.getMonth() + 1).padStart(2, "0"),
+        String(today.getDate()).padStart(2, "0"),
+      ].join("-");
+      $("entryDate").max = $("entryDate").defaultValue;
+
+      // --- Book autocomplete via the Google Books API (keyless, CORS-open) ---
+      let searchTimer = null;
+      let searchAbort = null;
+
+      let activeIndex = -1;
+
+      function hideSuggestions() {
+        show($("suggestions"), false);
+        $("title").setAttribute("aria-expanded", "false");
+        $("title").removeAttribute("aria-activedescendant");
+        activeIndex = -1;
+      }
+
+      function setActive(i) {
+        const opts = $("suggestions").querySelectorAll("button");
+        if (!opts.length) return;
+        activeIndex = (i + opts.length) % opts.length;
+        opts.forEach((o, idx) =>
+          o.classList.toggle("active", idx === activeIndex),
+        );
+        opts[activeIndex].scrollIntoView({ block: "nearest" });
+        $("title").setAttribute("aria-activedescendant", opts[activeIndex].id);
+      }
+
+      // Normalized suggestion shape: { title, authors, year, isbn, cover }
+      function renderSuggestions(books) {
+        const box = $("suggestions");
+        box.textContent = "";
+        activeIndex = -1;
+        books.forEach((b, idx) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.id = `sugg-${idx}`;
+          btn.setAttribute("role", "option");
+          if (b.cover) {
+            const img = document.createElement("img");
+            img.src = b.cover;
+            img.alt = "";
+            img.loading = "lazy";
+            btn.append(img);
+          }
+          const txt = document.createElement("span");
+          txt.textContent = b.title;
           const meta = document.createElement("span");
           meta.className = "s-meta";
-          meta.textContent = `${e.rating}/10 · ${fmtDate(e.date)}`;
-          li.append(name, meta);
-          list.append(li);
-        }
-        $("stats").textContent = data.stats
-          ? `${data.stats.total} logged · ${data.stats.thisYear} this year · ${data.stats.avgRating} avg`
-          : "";
-        show($("recent-card"), uiState === "ready" && allEntries.length > 0);
-        checkDuplicate();
-      } catch {
-        // Best-effort — the form works without it.
-      }
-    }
-
-    const normTitle = (s) => s.toLowerCase().trim().replace(/[.!?…]+$/, "");
-
-    function checkDuplicate() {
-      const q = normTitle($("title").value);
-      const hit = q && allEntries.find((e) => normTitle(e.title) === q);
-      if (hit) {
-        $("dup-hint").textContent = `Looks like you logged this on ${hit.date} (${hit.rating}/10).`;
-      }
-      show($("dup-hint"), Boolean(hit));
-    }
-
-    async function loadStatus() {
-      const res = await fetch("/api/status");
-      const s = res.ok ? await res.json() : { signedIn: false };
-      if (!s.signedIn) {
-        render("signedOut");
-        return;
-      }
-      $("who").textContent = s.email || "Signed in";
-      if (s.docUrl) {
-        $("doc-link").href = s.docUrl;
-        show($("doc-link"), true);
-      }
-      render("ready");
-      loadRecent();
-    }
-
-    $("signin").addEventListener("click", () => {
-      window.location.href = "/auth/google";
-    });
-    $("reconnect").addEventListener("click", () => {
-      window.location.href = "/auth/google?consent=1";
-    });
-    $("signout").addEventListener("click", async () => {
-      await fetch("/api/signout", { method: "POST" });
-      render("signedOut");
-    });
-
-    $("export").addEventListener("click", async () => {
-      setMessage("Building your prompt…");
-      try {
-        const res = await fetch("/api/export");
-        if (res.status === 404) {
-          setMessage("Log a book first — then I can build your recommendations prompt.", "error");
-          return;
-        }
-        if (res.status === 401) { render("signedOut"); return; }
-        if (res.status === 409) { setMessage(""); render("reconnect"); return; }
-        if (!res.ok) {
-          setMessage("Couldn't build the prompt — try again.", "error");
-          return;
-        }
-        const { prompt } = await res.json();
-        await navigator.clipboard.writeText(prompt);
-        setMessage("Copied! Paste it into your favorite AI chat for book recommendations.", "ok");
-      } catch {
-        setMessage("Couldn't copy to the clipboard — try again.", "error");
-      }
-    });
-
-    $("entry-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      setMessage("Saving…");
-      $("submit").disabled = true;
-      try {
-        const res = await fetch("/api/entries", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: $("title").value,
-            author: $("author").value,
-            rating: Number($("rating").value),
-            date: $("entryDate").value,
-            isbn: $("isbn").value,
-            coverUrl: $("coverUrl").value,
-            liked: $("liked").value,
-            disliked: $("disliked").value,
-            notes: $("notes").value,
-          }),
+          meta.textContent =
+            [b.authors, b.year].filter(Boolean).join(" · ") || "Unknown author";
+          txt.append(meta);
+          btn.append(txt);
+          btn.addEventListener("click", () => {
+            $("title").value = b.title;
+            $("author").value = b.authors;
+            $("isbn").value = b.isbn;
+            $("coverUrl").value = b.cover;
+            hideSuggestions();
+            checkDuplicate();
+            $("rating").focus();
+          });
+          box.append(btn);
         });
-        const body = await res.json().catch(() => ({}));
-        if (res.ok) {
-          $("entry-form").reset();
-          updateRating();
-          if (body.docUrl) {
-            $("doc-link").href = body.docUrl;
-            show($("doc-link"), true);
-          }
-          setMessage("Saved to your doc ✓", "ok");
-          loadRecent();
-        } else if (res.status === 401) {
-          render("signedOut");
-        } else if (res.status === 409) {
-          setMessage("");
-          render("reconnect");
-        } else {
-          setMessage("Something went wrong saving that entry.", "error");
-        }
-      } catch {
-        setMessage("Network error — try again.", "error");
-      } finally {
-        $("submit").disabled = false;
+        show(box, books.length > 0);
+        $("title").setAttribute("aria-expanded", String(books.length > 0));
       }
-    });
 
-    if (new URLSearchParams(location.search).get("error")) {
-      const el = $("signin-message");
-      el.textContent = "Google sign-in didn't complete — please try again.";
-      el.className = "error";
-    }
+      async function searchGoogleBooks(q, signal) {
+        const params = new URLSearchParams({
+          q,
+          maxResults: "6",
+          printType: "books",
+          fields:
+            "items(volumeInfo(title,authors,publishedDate,industryIdentifiers,imageLinks))",
+        });
+        const res = await fetch(
+          `https://www.googleapis.com/books/v1/volumes?${params}`,
+          { signal },
+        );
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        return (data.items || [])
+          .map((i) => i.volumeInfo)
+          .filter((v) => v && v.title)
+          .map((v) => {
+            const ids = Array.isArray(v.industryIdentifiers)
+              ? v.industryIdentifiers
+              : [];
+            const by = (t) => ids.find((i) => i && i.type === t)?.identifier;
+            return {
+              title: v.title,
+              authors: (v.authors || []).join(", "),
+              year: (v.publishedDate || "").slice(0, 4),
+              isbn: by("ISBN_13") || by("ISBN_10") || "",
+              cover: (v.imageLinks?.thumbnail || "").replace(
+                /^http:/,
+                "https:",
+              ),
+            };
+          });
+      }
 
-    loadStatus();
-  </script>
-</body>
+      async function searchOpenLibrary(q, signal) {
+        const params = new URLSearchParams({
+          q,
+          limit: "6",
+          fields: "title,author_name,first_publish_year,isbn,cover_i",
+        });
+        const res = await fetch(
+          `https://openlibrary.org/search.json?${params}`,
+          { signal },
+        );
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        return (data.docs || [])
+          .filter((d) => d && d.title)
+          .map((d) => {
+            const isbns = Array.isArray(d.isbn) ? d.isbn : [];
+            const isbn13 = isbns.find(
+              (i) => i.length === 13 && /^97[89]/.test(i),
+            );
+            return {
+              title: d.title,
+              authors: (d.author_name || []).join(", "),
+              year: d.first_publish_year ? String(d.first_publish_year) : "",
+              isbn: isbn13 || isbns[0] || "",
+              cover: d.cover_i
+                ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg`
+                : "",
+            };
+          });
+      }
+
+      async function searchBooks(q) {
+        if (searchAbort) searchAbort.abort();
+        searchAbort = new AbortController();
+        const signal = searchAbort.signal;
+        try {
+          let books = [];
+          try {
+            books = await searchGoogleBooks(q, signal);
+          } catch (err) {
+            if (signal.aborted) return;
+            // Google Books keyless quota is per-IP and can run out; Open
+            // Library covers the gap.
+            books = await searchOpenLibrary(q, signal);
+          }
+          if (!signal.aborted) renderSuggestions(books);
+        } catch {
+          // Aborted or offline — autocomplete is best-effort; typing still works.
+        }
+      }
+
+      $("title").addEventListener("input", () => {
+        clearTimeout(searchTimer);
+        $("coverUrl").value = ""; // manual edits invalidate the picked cover
+        checkDuplicate();
+        const q = $("title").value.trim();
+        if (q.length < 3) {
+          hideSuggestions();
+          return;
+        }
+        searchTimer = setTimeout(() => searchBooks(q), 300);
+      });
+      $("title").addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          hideSuggestions();
+          return;
+        }
+        if ($("suggestions").classList.contains("hidden")) return;
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setActive(activeIndex + 1);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setActive(activeIndex - 1);
+        } else if (e.key === "Enter" && activeIndex >= 0) {
+          e.preventDefault();
+          $("suggestions").querySelectorAll("button")[activeIndex].click();
+        }
+      });
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".lookup")) hideSuggestions();
+      });
+
+      function setMessage(text, kind) {
+        const el = $("message");
+        el.textContent = text;
+        el.className = kind || "";
+      }
+
+      let allEntries = [];
+      let uiState = "signedOut";
+
+      function render(state) {
+        uiState = state;
+        show($("signin-card"), state === "signedOut");
+        show($("reconnect-card"), state === "reconnect");
+        show($("status"), state !== "signedOut");
+        show($("entry-form"), state === "ready");
+        show($("recent-card"), state === "ready" && allEntries.length > 0);
+      }
+
+      function fmtDate(iso) {
+        return new Date(iso + "T00:00:00Z").toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        });
+      }
+
+      async function loadRecent() {
+        try {
+          const res = await fetch("/api/recent");
+          if (res.status === 401) return render("signedOut");
+          if (res.status === 409) return render("reconnect");
+          if (!res.ok) return;
+          const data = await res.json();
+          allEntries = data.entries || [];
+          const list = $("recent-list");
+          list.textContent = "";
+          for (const e of allEntries.slice(-5).reverse()) {
+            const li = document.createElement("li");
+            const name = document.createElement("span");
+            name.textContent = e.author ? `${e.title} — ${e.author}` : e.title;
+            const meta = document.createElement("span");
+            meta.className = "s-meta";
+            meta.textContent = `${e.rating}/10 · ${fmtDate(e.date)}`;
+            li.append(name, meta);
+            list.append(li);
+          }
+          $("stats").textContent = data.stats
+            ? `${data.stats.total} logged · ${data.stats.thisYear} this year · ${data.stats.avgRating} avg`
+            : "";
+          render(uiState);
+          checkDuplicate();
+        } catch {
+          // Best-effort — the form works without it.
+        }
+      }
+
+      const normTitle = (s) =>
+        s
+          .toLowerCase()
+          .trim()
+          .replace(/[.!?…]+$/, "");
+
+      function checkDuplicate() {
+        const q = normTitle($("title").value);
+        const hit = q && allEntries.find((e) => normTitle(e.title) === q);
+        if (hit) {
+          $("dup-hint").textContent =
+            `Looks like you logged this on ${hit.date} (${hit.rating}/10).`;
+        }
+        show($("dup-hint"), Boolean(hit));
+      }
+
+      async function loadStatus() {
+        const res = await fetch("/api/status");
+        const s = res.ok ? await res.json() : { signedIn: false };
+        if (!s.signedIn) {
+          render("signedOut");
+          return;
+        }
+        $("who").textContent = s.email || "Signed in";
+        if (s.docUrl) {
+          $("doc-link").href = s.docUrl;
+          show($("doc-link"), true);
+        }
+        render("ready");
+        loadRecent();
+      }
+
+      $("signin").addEventListener("click", () => {
+        window.location.href = "/auth/google";
+      });
+      $("reconnect").addEventListener("click", () => {
+        window.location.href = "/auth/google?consent=1";
+      });
+      $("signout").addEventListener("click", async () => {
+        await fetch("/api/signout", { method: "POST" });
+        render("signedOut");
+      });
+
+      $("export").addEventListener("click", async () => {
+        setMessage("Building your prompt…");
+        try {
+          const res = await fetch("/api/export");
+          if (res.status === 404) {
+            setMessage(
+              "Log a book first — then I can build your recommendations prompt.",
+              "error",
+            );
+            return;
+          }
+          if (res.status === 401) {
+            render("signedOut");
+            return;
+          }
+          if (res.status === 409) {
+            setMessage("");
+            render("reconnect");
+            return;
+          }
+          if (!res.ok) {
+            setMessage("Couldn't build the prompt — try again.", "error");
+            return;
+          }
+          const { prompt } = await res.json();
+          await navigator.clipboard.writeText(prompt);
+          setMessage(
+            "Copied! Paste it into your favorite AI chat for book recommendations.",
+            "ok",
+          );
+        } catch {
+          setMessage("Couldn't copy to the clipboard — try again.", "error");
+        }
+      });
+
+      $("entry-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        setMessage("Saving…");
+        $("submit").disabled = true;
+        try {
+          const res = await fetch("/api/entries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: $("title").value,
+              author: $("author").value,
+              rating: Number($("rating").value),
+              date: $("entryDate").value,
+              isbn: $("isbn").value,
+              coverUrl: $("coverUrl").value,
+              liked: $("liked").value,
+              disliked: $("disliked").value,
+              notes: $("notes").value,
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            $("entry-form").reset();
+            updateRating();
+            if (body.docUrl) {
+              $("doc-link").href = body.docUrl;
+              show($("doc-link"), true);
+            }
+            setMessage("Saved to your doc ✓", "ok");
+            loadRecent();
+          } else if (res.status === 401) {
+            render("signedOut");
+          } else if (res.status === 409) {
+            setMessage("");
+            render("reconnect");
+          } else {
+            setMessage("Something went wrong saving that entry.", "error");
+          }
+        } catch {
+          setMessage("Network error — try again.", "error");
+        } finally {
+          $("submit").disabled = false;
+        }
+      });
+
+      if (new URLSearchParams(location.search).get("error")) {
+        const el = $("signin-message");
+        el.textContent = "Google sign-in didn't complete — please try again.";
+        el.className = "error";
+      }
+
+      loadStatus();
+    </script>
+  </body>
 </html>

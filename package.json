@@ -1,14 +1,22 @@
 {
   "name": "buktrakr",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260724.0",
+    "prettier": "^3.3.0",
     "typescript": "^5.5.4",
+    "vitest": "^3.0.0",
     "wrangler": "^4.0.0"
   }
 }
