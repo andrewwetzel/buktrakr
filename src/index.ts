@@ -88,6 +88,12 @@ function validateEntry(body: unknown): Entry | null {
     typeof b.isbn === "string" && b.isbn.length <= 32
       ? b.isbn.replace(/[^0-9Xx-]/g, "")
       : "";
+  // "Date read" — lenient: anything malformed falls back to today.
+  let date = new Date().toISOString().slice(0, 10);
+  if (typeof b.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) {
+    const parsed = new Date(b.date + "T00:00:00Z");
+    if (!Number.isNaN(parsed.getTime()) && parsed.getFullYear() >= 1900) date = b.date;
+  }
   // Only cover URLs from the book APIs may be embedded into users' docs.
   let coverUrl = "";
   if (typeof b.coverUrl === "string" && b.coverUrl.length <= 500) {
@@ -104,7 +110,7 @@ function validateEntry(body: unknown): Entry | null {
       // Not a URL — ignore.
     }
   }
-  return { title, author, rating, isbn, coverUrl, liked, disliked, notes };
+  return { title, author, rating, date, isbn, coverUrl, liked, disliked, notes };
 }
 
 export default {

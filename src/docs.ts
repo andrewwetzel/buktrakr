@@ -10,6 +10,8 @@ export interface Entry {
   title: string;
   author: string;
   rating: number;
+  /** YYYY-MM-DD "date read" (defaults to submission day server-side). */
+  date: string;
   isbn: string;
   coverUrl: string;
   liked: string;
@@ -87,8 +89,7 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
   // The body's final newline cannot be inserted at/after, hence -1.
   const insertAt = (await getEndIndex(accessToken, docId)) - 1;
 
-  const date = new Date().toISOString().slice(0, 10);
-  const meta = [`Rating: ${entry.rating}/10`, date];
+  const meta = [`Rating: ${entry.rating}/10`, entry.date];
   if (entry.isbn) meta.push(`ISBN ${entry.isbn}`);
   const hasCover = Boolean(entry.coverUrl);
   const parts: { text: string; kind: "title" | "cover" | "meta" | "label" | "body" }[] = [

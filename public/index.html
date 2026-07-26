@@ -214,6 +214,9 @@
       <label for="rating">Rating: <span id="rating-value">5</span>/10 — <span id="rating-mood">fine</span></label>
       <input type="range" id="rating" name="rating" min="1" max="10" step="1" value="5">
 
+      <label for="entryDate">Date read <span class="optional">(defaults to today)</span></label>
+      <input type="date" id="entryDate" name="date">
+
       <label for="liked">The Good</label>
       <textarea id="liked" name="liked" maxlength="5000" placeholder="What worked for you"></textarea>
 
@@ -254,6 +257,15 @@
     }
     $("rating").addEventListener("input", updateRating);
     updateRating();
+
+    // Local today as YYYY-MM-DD; defaultValue survives form.reset().
+    const today = new Date();
+    $("entryDate").defaultValue = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+    $("entryDate").max = $("entryDate").defaultValue;
 
     // --- Book autocomplete via the Google Books API (keyless, CORS-open) ---
     let searchTimer = null;
@@ -544,6 +556,7 @@
             title: $("title").value,
             author: $("author").value,
             rating: Number($("rating").value),
+            date: $("entryDate").value,
             isbn: $("isbn").value,
             coverUrl: $("coverUrl").value,
             liked: $("liked").value,
