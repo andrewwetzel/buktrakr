@@ -87,6 +87,32 @@
         margin: 0 0 1.5rem;
         font-style: italic;
       }
+      details.about {
+        margin: -0.75rem 0 1.25rem;
+      }
+      details.about summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 0.9rem;
+        text-decoration: underline;
+        width: fit-content;
+      }
+      details.about[open] summary {
+        margin-bottom: 0.6rem;
+      }
+      .about-body {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 1.1rem 1.25rem;
+        font-size: 0.95rem;
+      }
+      .about-body p {
+        margin: 0 0 0.8rem;
+      }
+      .about-body p:last-child {
+        margin-bottom: 0;
+      }
       .card {
         background: var(--card);
         border: 1px solid var(--line);
@@ -269,6 +295,39 @@
       <h1>BukTrakr</h1>
       <p class="tagline">What did you just read?</p>
 
+      <details class="about">
+        <summary>What is this?</summary>
+        <div class="about-body">
+          <p>
+            BukTrakr is a tiny book journal. Log a book you've just read — a
+            rating out of 10, what was good, what was bad, and anything else —
+            and it's appended, nicely formatted, to a "BukTrakr — Book Reviews"
+            Google Doc <em>in your own Google Drive</em>. Everyone who signs in
+            gets their own doc; your reviews are yours alone.
+          </p>
+          <p>
+            Nothing is stored on any server: your Google connection lives in an
+            encrypted cookie in your browser, and the app's permission only
+            covers the one doc it creates — it cannot see the rest of your
+            Drive. Sign in once and start logging; the title field
+            auto-completes real books (with covers and ISBNs), a button copies
+            your whole reading log as a prompt for any AI chat to get
+            recommendations, and on a phone you can Add to Home Screen to use it
+            like an app.
+          </p>
+          <p>
+            It's open source —
+            <a
+              href="https://github.com/andrewwetzel/buktrakr"
+              target="_blank"
+              rel="noopener"
+              >view the source on GitHub</a
+            >
+            or deploy your own copy.
+          </p>
+        </div>
+      </details>
+
       <div class="card hidden" id="signin-card">
         <p>
           Sign in with Google and every book you log is appended to a "BukTrakr
@@ -400,7 +459,13 @@
       <footer>
         Nothing is stored on the server. Your Google connection lives in an
         encrypted cookie in this browser, and the app can only touch the one doc
-        it creates in your Drive. Book search powered by the Google Books API.
+        it creates in your Drive. Book search powered by the Google Books API ·
+        <a
+          href="https://github.com/andrewwetzel/buktrakr"
+          target="_blank"
+          rel="noopener"
+          >Source on GitHub</a
+        >
       </footer>
     </main>
 
