@@ -75,7 +75,11 @@ function validateEntry(body: unknown): Entry | null {
   if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 10) {
     return null;
   }
-  return { title, author, rating, liked, disliked, notes };
+  const isbn =
+    typeof b.isbn === "string" && b.isbn.length <= 32
+      ? b.isbn.replace(/[^0-9Xx-]/g, "")
+      : "";
+  return { title, author, rating, isbn, liked, disliked, notes };
 }
 
 export default {

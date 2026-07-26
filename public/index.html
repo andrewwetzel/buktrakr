@@ -72,6 +72,35 @@
       cursor: pointer;
     }
     #rating-value { color: var(--accent); }
+    .optional { font-weight: normal; color: var(--muted); font-size: 0.85rem; }
+    .lookup { position: relative; }
+    .suggestions {
+      position: absolute;
+      top: calc(100% + 2px);
+      left: 0;
+      right: 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+      max-height: 17rem;
+      overflow-y: auto;
+      z-index: 10;
+    }
+    .suggestions button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      color: var(--ink);
+      border: none;
+      border-radius: 0;
+      padding: 0.55rem 0.65rem;
+    }
+    .suggestions button:hover, .suggestions button:focus {
+      background: var(--bg);
+    }
+    .suggestions .s-meta { display: block; color: var(--muted); font-size: 0.85rem; }
     button {
       font: inherit;
       border: none;
@@ -126,10 +155,18 @@
 
     <form class="card hidden" id="entry-form">
       <label for="title">Book title</label>
-      <input id="title" name="title" required maxlength="500" autocomplete="off">
+      <div class="lookup">
+        <input id="title" name="title" required maxlength="500" autocomplete="off"
+               placeholder="Start typing to search books…" role="combobox"
+               aria-expanded="false" aria-controls="suggestions">
+        <div id="suggestions" class="suggestions hidden" role="listbox"></div>
+      </div>
 
       <label for="author">Author</label>
       <input id="author" name="author" required maxlength="500" autocomplete="off">
+
+      <label for="isbn">ISBN <span class="optional">(auto-filled, optional)</span></label>
+      <input id="isbn" name="isbn" maxlength="32" autocomplete="off">
 
       <label for="rating">Rating: <span id="rating-value">5</span>/10</label>
       <input type="range" id="rating" name="rating" min="1" max="10" step="1" value="5">
@@ -149,8 +186,9 @@
       <div id="message"></div>
     </form>
 
-    <footer>Stored server-side: your Google account id, a token that can write
-      only to the doc this app creates, and that doc's id. Nothing else.</footer>
+    <footer>Nothing is stored on the server. Your Google connection lives in an
+      encrypted cookie in this browser, and the app can only touch the one doc
+      it creates in your Drive. Book search powered by the Google Books API.</footer>
   </main>
 
   <script>
@@ -159,6 +197,125 @@
 
     $("rating").addEventListener("input", () => {
       $("rating-value").textContent = $("rating").value;
+    });
+
+    // --- Book autocomplete via the Google Books API (keyless, CORS-open) ---
+    let searchTimer = null;
+    let searchAbort = null;
+
+    function hideSuggestions() {
+      show($("suggestions"), false);
+      $("title").setAttribute("aria-expanded", "false");
+    }
+
+    // Normalized suggestion shape: { title, authors, year, isbn }
+    function renderSuggestions(books) {
+      const box = $("suggestions");
+      box.textContent = "";
+      for (const b of books) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("role", "option");
+        btn.textContent = b.title;
+        const meta = document.createElement("span");
+        meta.className = "s-meta";
+        meta.textContent = [b.authors, b.year].filter(Boolean).join(" · ") || "Unknown author";
+        btn.append(meta);
+        btn.addEventListener("click", () => {
+          $("title").value = b.title;
+          $("author").value = b.authors;
+          $("isbn").value = b.isbn;
+          hideSuggestions();
+          $("rating").focus();
+        });
+        box.append(btn);
+      }
+      show(box, books.length > 0);
+      $("title").setAttribute("aria-expanded", String(books.length > 0));
+    }
+
+    async function searchGoogleBooks(q, signal) {
+      const params = new URLSearchParams({
+        q,
+        maxResults: "6",
+        printType: "books",
+        fields: "items(volumeInfo(title,authors,publishedDate,industryIdentifiers))",
+      });
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?${params}`, { signal });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      return (data.items || [])
+        .map((i) => i.volumeInfo)
+        .filter((v) => v && v.title)
+        .map((v) => {
+          const ids = Array.isArray(v.industryIdentifiers) ? v.industryIdentifiers : [];
+          const by = (t) => ids.find((i) => i && i.type === t)?.identifier;
+          return {
+            title: v.title,
+            authors: (v.authors || []).join(", "),
+            year: (v.publishedDate || "").slice(0, 4),
+            isbn: by("ISBN_13") || by("ISBN_10") || "",
+          };
+        });
+    }
+
+    async function searchOpenLibrary(q, signal) {
+      const params = new URLSearchParams({
+        q,
+        limit: "6",
+        fields: "title,author_name,first_publish_year,isbn",
+      });
+      const res = await fetch(`https://openlibrary.org/search.json?${params}`, { signal });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      return (data.docs || [])
+        .filter((d) => d && d.title)
+        .map((d) => {
+          const isbns = Array.isArray(d.isbn) ? d.isbn : [];
+          const isbn13 = isbns.find((i) => i.length === 13 && /^97[89]/.test(i));
+          return {
+            title: d.title,
+            authors: (d.author_name || []).join(", "),
+            year: d.first_publish_year ? String(d.first_publish_year) : "",
+            isbn: isbn13 || isbns[0] || "",
+          };
+        });
+    }
+
+    async function searchBooks(q) {
+      if (searchAbort) searchAbort.abort();
+      searchAbort = new AbortController();
+      const signal = searchAbort.signal;
+      try {
+        let books = [];
+        try {
+          books = await searchGoogleBooks(q, signal);
+        } catch (err) {
+          if (signal.aborted) return;
+          // Google Books keyless quota is per-IP and can run out; Open
+          // Library covers the gap.
+          books = await searchOpenLibrary(q, signal);
+        }
+        if (!signal.aborted) renderSuggestions(books);
+      } catch {
+        // Aborted or offline — autocomplete is best-effort; typing still works.
+      }
+    }
+
+    $("title").addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      const q = $("title").value.trim();
+      if (q.length < 3) {
+        hideSuggestions();
+        return;
+      }
+      searchTimer = setTimeout(() => searchBooks(q), 300);
+    });
+    $("title").addEventListener("keydown", (e) => {
+      if (e.key === "Escape") hideSuggestions();
+    });
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".lookup")) hideSuggestions();
     });
 
     function setMessage(text, kind) {
@@ -212,6 +369,7 @@
             title: $("title").value,
             author: $("author").value,
             rating: Number($("rating").value),
+            isbn: $("isbn").value,
             liked: $("liked").value,
             disliked: $("disliked").value,
             notes: $("notes").value,

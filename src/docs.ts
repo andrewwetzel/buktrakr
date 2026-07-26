@@ -10,6 +10,7 @@ export interface Entry {
   title: string;
   author: string;
   rating: number;
+  isbn: string;
   liked: string;
   disliked: string;
   notes: string;
@@ -86,9 +87,11 @@ export async function appendEntry(accessToken: string, docId: string, entry: Ent
   const insertAt = (await getEndIndex(accessToken, docId)) - 1;
 
   const date = new Date().toISOString().slice(0, 10);
+  const meta = [`Rating: ${entry.rating}/10`, date];
+  if (entry.isbn) meta.push(`ISBN ${entry.isbn}`);
   const lines = [
     clean(`${entry.title} — ${entry.author}`),
-    `Rating: ${entry.rating}/10 · ${date}`,
+    meta.join(" · "),
     "The Good",
     clean(entry.liked.trim()) || "—",
     "The Bad",
