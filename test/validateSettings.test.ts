@@ -9,6 +9,11 @@ describe("validateSettings", () => {
     expect(
       validateSettings({ mode: "sheet", docName: "Log", style: "classic" }),
     ).toMatchObject({ mode: "sheet" });
+    for (const style of ["ocean", "sunset", "royal", "typewriter", "rose"]) {
+      expect(
+        validateSettings({ mode: "doc", docName: "x", style }),
+      ).toMatchObject({ style });
+    }
   });
 
   it("defaults a blank name and collapses whitespace", () => {

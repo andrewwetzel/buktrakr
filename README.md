@@ -85,7 +85,8 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
   last five entries with quick stats, and warns (without blocking) when a
   title you're entering matches something you already logged.
 - **Customizable destination (Settings)**: each user can rename their
-  reviews file, pick a doc styling template (Classic, Minimal, or Vintage —
+  reviews file, pick one of eight doc styling templates (Classic, Minimal,
+  Vintage, Ocean, Sunset, Royal, Typewriter, Rose — shown as live previews,
   applied to new entries), or switch the destination to a **Google Sheet**
   (one row per book with a frozen, bold header row; review text is written
   as literal values so it can never be interpreted as formulas). Settings

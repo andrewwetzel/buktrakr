@@ -5,7 +5,16 @@ export const DOC_TITLE = "BukTrakr — Book Reviews";
 export const DOC_MIME = "application/vnd.google-apps.document";
 
 /** Doc styling templates users can pick in Settings. */
-export const STYLE_IDS = ["classic", "minimal", "vintage"] as const;
+export const STYLE_IDS = [
+  "classic",
+  "minimal",
+  "vintage",
+  "ocean",
+  "sunset",
+  "royal",
+  "typewriter",
+  "rose",
+] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
 
 /** The doc was deleted from Drive; caller should create a fresh one and retry. */
@@ -222,9 +231,88 @@ interface Range {
   end: number;
 }
 
+type TextStyle = Record<string, unknown>;
+
+interface StyleDef {
+  /** Paragraph style for the title line. */
+  titlePara: "HEADING_2" | "NORMAL_TEXT";
+  /** Text style applied to the whole entry block first (others override). */
+  block?: TextStyle;
+  title?: TextStyle;
+  meta: TextStyle;
+  label: TextStyle;
+}
+
+const rgb = (hex: string): { color: { rgbColor: Record<string, number> } } => {
+  const n = parseInt(hex.slice(1), 16);
+  return {
+    color: {
+      rgbColor: {
+        red: ((n >> 16) & 255) / 255,
+        green: ((n >> 8) & 255) / 255,
+        blue: (n & 255) / 255,
+      },
+    },
+  };
+};
+const pt = (magnitude: number) => ({ magnitude, unit: "PT" });
+const font = (fontFamily: string) => ({ weightedFontFamily: { fontFamily } });
+
+// Keep in sync with the preview cards in public/index.html (.prev-<id>).
+const STYLE_DEFS: Record<StyleId, StyleDef> = {
+  classic: {
+    titlePara: "HEADING_2",
+    meta: { italic: true },
+    label: { bold: true },
+  },
+  minimal: {
+    titlePara: "NORMAL_TEXT",
+    title: { bold: true, fontSize: pt(13) },
+    meta: { italic: true, foregroundColor: rgb("#737165") },
+    label: { bold: true },
+  },
+  vintage: {
+    titlePara: "HEADING_2",
+    title: { foregroundColor: rgb("#3B6E4F"), ...font("Playfair Display") },
+    meta: { italic: true },
+    label: { bold: true, smallCaps: true },
+  },
+  ocean: {
+    titlePara: "HEADING_2",
+    title: { foregroundColor: rgb("#1B4F72"), ...font("Merriweather") },
+    meta: { italic: true, foregroundColor: rgb("#5D6D7E") },
+    label: { bold: true, foregroundColor: rgb("#21618C") },
+  },
+  sunset: {
+    titlePara: "HEADING_2",
+    title: { foregroundColor: rgb("#A04000"), ...font("Lora") },
+    meta: { italic: true, foregroundColor: rgb("#935116") },
+    label: { bold: true, foregroundColor: rgb("#CA6F1E") },
+  },
+  royal: {
+    titlePara: "HEADING_2",
+    title: { foregroundColor: rgb("#5B2C6F"), ...font("Playfair Display") },
+    meta: { italic: true, foregroundColor: rgb("#7D3C98") },
+    label: { bold: true, smallCaps: true, foregroundColor: rgb("#6C3483") },
+  },
+  typewriter: {
+    titlePara: "NORMAL_TEXT",
+    block: font("Courier New"),
+    title: { bold: true, fontSize: pt(13) },
+    meta: { italic: true },
+    label: { bold: true },
+  },
+  rose: {
+    titlePara: "HEADING_2",
+    title: { foregroundColor: rgb("#B03A5B"), ...font("Lora") },
+    meta: { italic: true, foregroundColor: rgb("#8E3A4D") },
+    label: { bold: true, foregroundColor: rgb("#B03A5B") },
+  },
+};
+
 /**
- * Per-template styling requests. Every template styles the same four pieces
- * (title paragraph, meta line, section labels, whole block) differently.
+ * Per-template styling requests. Every template styles the same pieces
+ * (title paragraph, optional whole-block font, meta line, section labels).
  */
 function styleRequests(
   style: StyleId,
@@ -233,6 +321,7 @@ function styleRequests(
   labelRs: Range[],
   blockEnd: number,
 ): unknown[] {
+  const def = STYLE_DEFS[style] ?? STYLE_DEFS.classic;
   const para = (r: Range, namedStyleType: string) => ({
     updateParagraphStyle: {
       range: { startIndex: r.start, endIndex: r.end },
@@ -240,50 +329,26 @@ function styleRequests(
       fields: "namedStyleType",
     },
   });
-  const text = (r: Range, textStyle: Record<string, unknown>) => ({
+  const text = (r: Range, textStyle: TextStyle) => ({
     updateTextStyle: {
       range: { startIndex: r.start, endIndex: r.end },
       textStyle,
       fields: Object.keys(textStyle).join(","),
     },
   });
-  const green = {
-    color: { rgbColor: { red: 0.23, green: 0.43, blue: 0.31 } },
-  };
-  const grey = { color: { rgbColor: { red: 0.45, green: 0.42, blue: 0.38 } } };
   // The block after the title is explicitly NORMAL_TEXT in every template so
   // nothing inherits heading style.
-  const rest: Range = { start: titleR.end + 1, end: blockEnd };
-
-  switch (style) {
-    case "minimal":
-      return [
-        para({ start: titleR.start, end: titleR.end + 1 }, "NORMAL_TEXT"),
-        para(rest, "NORMAL_TEXT"),
-        text(titleR, { bold: true, fontSize: { magnitude: 13, unit: "PT" } }),
-        text(metaR, { italic: true, foregroundColor: grey }),
-        ...labelRs.map((r) => text(r, { bold: true })),
-      ];
-    case "vintage":
-      return [
-        para({ start: titleR.start, end: titleR.end + 1 }, "HEADING_2"),
-        para(rest, "NORMAL_TEXT"),
-        text(titleR, {
-          foregroundColor: green,
-          weightedFontFamily: { fontFamily: "Playfair Display" },
-        }),
-        text(metaR, { italic: true }),
-        ...labelRs.map((r) => text(r, { bold: true, smallCaps: true })),
-      ];
-    case "classic":
-    default:
-      return [
-        para({ start: titleR.start, end: titleR.end + 1 }, "HEADING_2"),
-        para(rest, "NORMAL_TEXT"),
-        text(metaR, { italic: true }),
-        ...labelRs.map((r) => text(r, { bold: true })),
-      ];
+  const requests: unknown[] = [
+    para({ start: titleR.start, end: titleR.end + 1 }, def.titlePara),
+    para({ start: titleR.end + 1, end: blockEnd }, "NORMAL_TEXT"),
+  ];
+  if (def.block) {
+    requests.push(text({ start: titleR.start, end: blockEnd }, def.block));
   }
+  if (def.title) requests.push(text(titleR, def.title));
+  requests.push(text(metaR, def.meta));
+  for (const r of labelRs) requests.push(text(r, def.label));
+  return requests;
 }
 
 /** One append attempt; returns false on a revision/index conflict (retryable). */

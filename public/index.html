@@ -404,6 +404,66 @@
         font-variant: small-caps;
         text-transform: lowercase;
       }
+      .prev-ocean .p-title,
+      .prev-sunset .p-title,
+      .prev-royal .p-title,
+      .prev-rose .p-title {
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 0.95rem;
+        margin-bottom: 0.1rem;
+      }
+      .prev-ocean .p-title {
+        color: #1b4f72;
+      }
+      .prev-ocean .p-meta {
+        color: #5d6d7e;
+      }
+      .prev-ocean .p-label {
+        color: #21618c;
+      }
+      .prev-sunset .p-title {
+        color: #a04000;
+      }
+      .prev-sunset .p-meta {
+        color: #935116;
+      }
+      .prev-sunset .p-label {
+        color: #ca6f1e;
+      }
+      .prev-royal .p-title {
+        font-family: "Playfair Display", Georgia, serif;
+        color: #5b2c6f;
+      }
+      .prev-royal .p-meta {
+        color: #7d3c98;
+      }
+      .prev-royal .p-label {
+        color: #6c3483;
+        font-variant: small-caps;
+        text-transform: lowercase;
+      }
+      .prev-typewriter {
+        font-family: "Courier New", Courier, monospace;
+      }
+      .prev-typewriter .p-title {
+        font-weight: bold;
+        font-size: 0.78rem;
+      }
+      .prev-rose .p-title {
+        color: #b03a5b;
+      }
+      .prev-rose .p-meta {
+        color: #8e3a4d;
+      }
+      .prev-rose .p-label {
+        color: #b03a5b;
+      }
+      .style-grid.collapsed .style-card.extra {
+        display: none;
+      }
+      #style-more {
+        margin-top: 0.6rem;
+      }
       .actions {
         margin-top: 1.2rem;
         display: flex;
@@ -628,57 +688,14 @@
 
             <label id="style-label">Doc style</label>
             <div
-              class="style-grid"
+              class="style-grid collapsed"
               id="style-grid"
               role="radiogroup"
               aria-labelledby="style-label"
-            >
-              <button
-                type="button"
-                class="style-card"
-                data-style="classic"
-                role="radio"
-                aria-checked="true"
-              >
-                <span class="style-name">Classic</span>
-                <span class="prev prev-classic">
-                  <span class="p-title">Dune — Frank Herbert</span>
-                  <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
-                  <span class="p-label">The Good</span>
-                  <span class="p-body">Sweeping, strange, unforgettable.</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                class="style-card"
-                data-style="minimal"
-                role="radio"
-                aria-checked="false"
-              >
-                <span class="style-name">Minimal</span>
-                <span class="prev prev-minimal">
-                  <span class="p-title">Dune — Frank Herbert</span>
-                  <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
-                  <span class="p-label">The Good</span>
-                  <span class="p-body">Sweeping, strange, unforgettable.</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                class="style-card"
-                data-style="vintage"
-                role="radio"
-                aria-checked="false"
-              >
-                <span class="style-name">Vintage</span>
-                <span class="prev prev-vintage">
-                  <span class="p-title">Dune — Frank Herbert</span>
-                  <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
-                  <span class="p-label">The Good</span>
-                  <span class="p-body">Sweeping, strange, unforgettable.</span>
-                </span>
-              </button>
-            </div>
+            ></div>
+            <button type="button" class="pill" id="style-more">
+              Show all styles
+            </button>
 
             <div class="actions">
               <button id="settings-save">Save settings</button>
@@ -951,19 +968,66 @@
 
       let selectedStyle = "classic";
 
+      // id, display name, extra (hidden until "Show all styles").
+      // Previews are styled by .prev-<id> CSS, mirroring src/docs.ts.
+      const STYLE_CARDS = [
+        ["classic", "Classic", false],
+        ["minimal", "Minimal", false],
+        ["vintage", "Vintage", false],
+        ["ocean", "Ocean", true],
+        ["sunset", "Sunset", true],
+        ["royal", "Royal", true],
+        ["typewriter", "Typewriter", true],
+        ["rose", "Rose", true],
+      ];
+      const PREVIEW_LINES = [
+        ["p-title", "Dune — Frank Herbert"],
+        ["p-meta", "Rating: 9/10 · 2026-07-01"],
+        ["p-label", "The Good"],
+        ["p-body", "Sweeping, strange, unforgettable."],
+      ];
+
+      for (const [id, name, extra] of STYLE_CARDS) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = extra ? "style-card extra" : "style-card";
+        btn.dataset.style = id;
+        btn.setAttribute("role", "radio");
+        btn.setAttribute("aria-checked", String(id === "classic"));
+        const nm = document.createElement("span");
+        nm.className = "style-name";
+        nm.textContent = name;
+        const prev = document.createElement("span");
+        prev.className = `prev prev-${id}`;
+        for (const [cls, txt] of PREVIEW_LINES) {
+          const line = document.createElement("span");
+          line.className = cls;
+          line.textContent = txt;
+          prev.append(line);
+        }
+        btn.append(nm, prev);
+        btn.addEventListener("click", () => setStyleChoice(id));
+        $("style-grid").append(btn);
+      }
+
+      function expandStyles(open) {
+        $("style-grid").classList.toggle("collapsed", !open);
+        $("style-more").textContent = open
+          ? "Show fewer styles"
+          : "Show all styles";
+      }
+      $("style-more").addEventListener("click", () => {
+        expandStyles($("style-grid").classList.contains("collapsed"));
+      });
+
       function setStyleChoice(style) {
         selectedStyle = style;
         for (const card of document.querySelectorAll(".style-card")) {
-          card.setAttribute(
-            "aria-checked",
-            String(card.dataset.style === style),
-          );
+          const chosen = card.dataset.style === style;
+          card.setAttribute("aria-checked", String(chosen));
+          // A hidden pick (synced from another device) must be visible.
+          if (chosen && card.classList.contains("extra")) expandStyles(true);
         }
-      }
-      for (const card of document.querySelectorAll(".style-card")) {
-        card.addEventListener("click", () =>
-          setStyleChoice(card.dataset.style),
-        );
       }
 
       function applySettings(settings) {
