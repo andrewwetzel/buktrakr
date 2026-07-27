@@ -78,6 +78,29 @@
         width: 100%;
         max-width: 34rem;
       }
+      /* Single column on phones: the wrappers vanish from layout so the flow
+         is identical to the pre-columns markup. */
+      .columns,
+      .col-main,
+      .col-side {
+        display: contents;
+      }
+      @media (min-width: 64rem) {
+        main {
+          max-width: 72rem;
+        }
+        .columns {
+          display: grid;
+          grid-template-columns: 3fr 2fr;
+          column-gap: 1.5rem;
+          align-items: start;
+        }
+        .col-main,
+        .col-side {
+          display: block;
+          min-width: 0;
+        }
+      }
       h1 {
         font-size: 1.7rem;
         margin: 0 0 0.25rem;
@@ -488,184 +511,195 @@
         </div>
       </div>
 
-      <div class="card hidden" id="settings-card">
-        <label>Where entries go</label>
-        <div class="choice-row">
-          <label class="choice"
-            ><input type="radio" name="mode" value="doc" checked /> Google
-            Doc</label
-          >
-          <label class="choice"
-            ><input type="radio" name="mode" value="sheet" /> Google Sheet
-            <span class="optional"
-              >(one row per book, header frozen)</span
-            ></label
-          >
+      <div class="columns">
+        <div class="col-main">
+          <form class="card hidden" id="entry-form">
+            <label for="title">Book title</label>
+            <div class="lookup">
+              <input
+                id="title"
+                name="title"
+                required
+                maxlength="500"
+                autocomplete="off"
+                placeholder="Start typing to search books…"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="suggestions"
+              />
+              <div
+                id="suggestions"
+                class="suggestions hidden"
+                role="listbox"
+              ></div>
+            </div>
+            <div id="dup-hint" class="hint hidden"></div>
+
+            <label for="author">Author</label>
+            <input
+              id="author"
+              name="author"
+              required
+              maxlength="500"
+              autocomplete="off"
+            />
+
+            <label for="isbn"
+              >ISBN <span class="optional">(auto-filled, optional)</span></label
+            >
+            <input id="isbn" name="isbn" maxlength="32" autocomplete="off" />
+
+            <input type="hidden" id="coverUrl" name="coverUrl" value="" />
+
+            <label for="rating"
+              >Rating: <span id="rating-value">5</span>/10 —
+              <span id="rating-mood">fine</span></label
+            >
+            <input
+              type="range"
+              id="rating"
+              name="rating"
+              min="1"
+              max="10"
+              step="1"
+              value="5"
+            />
+
+            <label for="entryDate"
+              >Date read
+              <span class="optional">(defaults to today)</span></label
+            >
+            <input type="date" id="entryDate" name="date" />
+
+            <label for="liked">The Good</label>
+            <textarea
+              id="liked"
+              name="liked"
+              maxlength="5000"
+              placeholder="What worked for you"
+            ></textarea>
+
+            <label for="disliked">The Bad</label>
+            <textarea
+              id="disliked"
+              name="disliked"
+              maxlength="5000"
+              placeholder="What didn't"
+            ></textarea>
+
+            <label for="notes">The Other</label>
+            <textarea
+              id="notes"
+              name="notes"
+              maxlength="5000"
+              placeholder="Anything else worth remembering"
+            ></textarea>
+
+            <div class="actions">
+              <button type="submit" id="submit">Add to my doc</button>
+            </div>
+            <div id="message"></div>
+          </form>
         </div>
 
-        <label for="doc-name">File name</label>
-        <input
-          id="doc-name"
-          maxlength="128"
-          autocomplete="off"
-          placeholder="BukTrakr — Book Reviews"
-        />
+        <div class="col-side">
+          <div class="card hidden" id="settings-card">
+            <label>Where entries go</label>
+            <div class="choice-row">
+              <label class="choice"
+                ><input type="radio" name="mode" value="doc" checked /> Google
+                Doc</label
+              >
+              <label class="choice"
+                ><input type="radio" name="mode" value="sheet" /> Google Sheet
+                <span class="optional"
+                  >(one row per book, header frozen)</span
+                ></label
+              >
+            </div>
 
-        <label id="style-label">Doc style</label>
-        <div
-          class="style-grid"
-          id="style-grid"
-          role="radiogroup"
-          aria-labelledby="style-label"
-        >
-          <button
-            type="button"
-            class="style-card"
-            data-style="classic"
-            role="radio"
-            aria-checked="true"
-          >
-            <span class="style-name">Classic</span>
-            <span class="prev prev-classic">
-              <span class="p-title">Dune — Frank Herbert</span>
-              <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
-              <span class="p-label">The Good</span>
-              <span class="p-body">Sweeping, strange, unforgettable.</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            class="style-card"
-            data-style="minimal"
-            role="radio"
-            aria-checked="false"
-          >
-            <span class="style-name">Minimal</span>
-            <span class="prev prev-minimal">
-              <span class="p-title">Dune — Frank Herbert</span>
-              <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
-              <span class="p-label">The Good</span>
-              <span class="p-body">Sweeping, strange, unforgettable.</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            class="style-card"
-            data-style="vintage"
-            role="radio"
-            aria-checked="false"
-          >
-            <span class="style-name">Vintage</span>
-            <span class="prev prev-vintage">
-              <span class="p-title">Dune — Frank Herbert</span>
-              <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
-              <span class="p-label">The Good</span>
-              <span class="p-body">Sweeping, strange, unforgettable.</span>
-            </span>
-          </button>
+            <label for="doc-name">File name</label>
+            <input
+              id="doc-name"
+              maxlength="128"
+              autocomplete="off"
+              placeholder="BukTrakr — Book Reviews"
+            />
+
+            <label id="style-label">Doc style</label>
+            <div
+              class="style-grid"
+              id="style-grid"
+              role="radiogroup"
+              aria-labelledby="style-label"
+            >
+              <button
+                type="button"
+                class="style-card"
+                data-style="classic"
+                role="radio"
+                aria-checked="true"
+              >
+                <span class="style-name">Classic</span>
+                <span class="prev prev-classic">
+                  <span class="p-title">Dune — Frank Herbert</span>
+                  <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
+                  <span class="p-label">The Good</span>
+                  <span class="p-body">Sweeping, strange, unforgettable.</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="style-card"
+                data-style="minimal"
+                role="radio"
+                aria-checked="false"
+              >
+                <span class="style-name">Minimal</span>
+                <span class="prev prev-minimal">
+                  <span class="p-title">Dune — Frank Herbert</span>
+                  <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
+                  <span class="p-label">The Good</span>
+                  <span class="p-body">Sweeping, strange, unforgettable.</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="style-card"
+                data-style="vintage"
+                role="radio"
+                aria-checked="false"
+              >
+                <span class="style-name">Vintage</span>
+                <span class="prev prev-vintage">
+                  <span class="p-title">Dune — Frank Herbert</span>
+                  <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
+                  <span class="p-label">The Good</span>
+                  <span class="p-body">Sweeping, strange, unforgettable.</span>
+                </span>
+              </button>
+            </div>
+
+            <div class="actions">
+              <button id="settings-save">Save settings</button>
+              <span class="hint" id="settings-message"></span>
+            </div>
+            <p class="hint" style="margin-top: 0.9rem">
+              Your choices are saved onto your Google files themselves, so they
+              follow you to any device the next time you sign in. Renames apply
+              to your existing file; switching destination starts (or resumes) a
+              file of that type — your other file is never touched.
+            </p>
+          </div>
+
+          <div class="card hidden" id="recent-card">
+            <div class="row">
+              <strong>Recently logged</strong>
+              <span class="who" id="stats"></span>
+            </div>
+            <ul id="recent-list"></ul>
+          </div>
         </div>
-
-        <div class="actions">
-          <button id="settings-save">Save settings</button>
-          <span class="hint" id="settings-message"></span>
-        </div>
-        <p class="hint" style="margin-top: 0.9rem">
-          Your choices are saved onto your Google files themselves, so they
-          follow you to any device the next time you sign in. Renames apply to
-          your existing file; switching destination starts (or resumes) a file
-          of that type — your other file is never touched.
-        </p>
-      </div>
-
-      <form class="card hidden" id="entry-form">
-        <label for="title">Book title</label>
-        <div class="lookup">
-          <input
-            id="title"
-            name="title"
-            required
-            maxlength="500"
-            autocomplete="off"
-            placeholder="Start typing to search books…"
-            role="combobox"
-            aria-expanded="false"
-            aria-controls="suggestions"
-          />
-          <div id="suggestions" class="suggestions hidden" role="listbox"></div>
-        </div>
-        <div id="dup-hint" class="hint hidden"></div>
-
-        <label for="author">Author</label>
-        <input
-          id="author"
-          name="author"
-          required
-          maxlength="500"
-          autocomplete="off"
-        />
-
-        <label for="isbn"
-          >ISBN <span class="optional">(auto-filled, optional)</span></label
-        >
-        <input id="isbn" name="isbn" maxlength="32" autocomplete="off" />
-
-        <input type="hidden" id="coverUrl" name="coverUrl" value="" />
-
-        <label for="rating"
-          >Rating: <span id="rating-value">5</span>/10 —
-          <span id="rating-mood">fine</span></label
-        >
-        <input
-          type="range"
-          id="rating"
-          name="rating"
-          min="1"
-          max="10"
-          step="1"
-          value="5"
-        />
-
-        <label for="entryDate"
-          >Date read <span class="optional">(defaults to today)</span></label
-        >
-        <input type="date" id="entryDate" name="date" />
-
-        <label for="liked">The Good</label>
-        <textarea
-          id="liked"
-          name="liked"
-          maxlength="5000"
-          placeholder="What worked for you"
-        ></textarea>
-
-        <label for="disliked">The Bad</label>
-        <textarea
-          id="disliked"
-          name="disliked"
-          maxlength="5000"
-          placeholder="What didn't"
-        ></textarea>
-
-        <label for="notes">The Other</label>
-        <textarea
-          id="notes"
-          name="notes"
-          maxlength="5000"
-          placeholder="Anything else worth remembering"
-        ></textarea>
-
-        <div class="actions">
-          <button type="submit" id="submit">Add to my doc</button>
-        </div>
-        <div id="message"></div>
-      </form>
-
-      <div class="card hidden" id="recent-card">
-        <div class="row">
-          <strong>Recently logged</strong>
-          <span class="who" id="stats"></span>
-        </div>
-        <ul id="recent-list"></ul>
       </div>
 
       <footer>
@@ -1031,10 +1065,14 @@
       });
 
       $("settings-toggle").addEventListener("click", () => {
-        show(
-          $("settings-card"),
-          $("settings-card").classList.contains("hidden"),
-        );
+        const opening = $("settings-card").classList.contains("hidden");
+        show($("settings-card"), opening);
+        if (opening) {
+          $("settings-card").scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+          });
+        }
       });
       for (const radio of document.querySelectorAll('input[name="mode"]')) {
         radio.addEventListener("change", syncSettingsUi);
