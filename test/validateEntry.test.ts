@@ -75,6 +75,39 @@ describe("validateEntry", () => {
     }
   });
 
+  it("marks series entries and requires both name and author", () => {
+    const e = validateEntry({ ...base, kind: "series", title: "The Expanse" })!;
+    expect(e.title).toBe("The Expanse (series)");
+    expect(e.author).toBe("Frank Herbert");
+    expect(validateEntry({ ...base, kind: "series", title: " " })).toBeNull();
+  });
+
+  it("marks author entries, drops title requirement, empties author column", () => {
+    const e = validateEntry({
+      kind: "author",
+      author: "Ursula K. Le Guin",
+      rating: 10,
+    })!;
+    expect(e.title).toBe("Ursula K. Le Guin (author)");
+    expect(e.author).toBe("");
+    expect(validateEntry({ kind: "author", rating: 10 })).toBeNull();
+  });
+
+  it("strips isbn and cover for non-book kinds", () => {
+    const e = validateEntry({
+      ...base,
+      kind: "series",
+      isbn: "9780441172719",
+      coverUrl: "https://books.google.com/books/content?id=abc",
+    })!;
+    expect(e.isbn).toBe("");
+    expect(e.coverUrl).toBe("");
+  });
+
+  it("treats unknown kinds as book", () => {
+    expect(validateEntry({ ...base, kind: "movie" })!.title).toBe("Dune");
+  });
+
   it("trims optional bodies and rejects oversized ones", () => {
     expect(validateEntry({ ...base, liked: "  spaced  " })!.liked).toBe(
       "spaced",

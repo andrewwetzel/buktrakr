@@ -268,6 +268,29 @@
         width: auto;
         accent-color: var(--accent);
       }
+      .seg {
+        display: flex;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 1rem;
+      }
+      .seg-btn {
+        flex: 1;
+        background: var(--card);
+        color: var(--muted);
+        border: none;
+        border-radius: 0;
+        padding: 0.5rem 0.25rem;
+        font-size: 0.95rem;
+      }
+      .seg-btn + .seg-btn {
+        border-left: 1px solid var(--line);
+      }
+      .seg-btn.active {
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
       #recent-list {
         list-style: none;
         margin: 0.6rem 0 0;
@@ -575,28 +598,64 @@
       <div class="columns">
         <div class="col-main">
           <form class="card hidden" id="entry-form">
-            <label for="title">Book title</label>
-            <div class="lookup">
-              <input
-                id="title"
-                name="title"
-                required
-                maxlength="500"
-                autocomplete="off"
-                placeholder="Start typing to search books…"
-                role="combobox"
-                aria-expanded="false"
-                aria-controls="suggestions"
-              />
-              <div
-                id="suggestions"
-                class="suggestions hidden"
-                role="listbox"
-              ></div>
+            <div
+              class="seg"
+              role="radiogroup"
+              aria-label="What are you logging?"
+            >
+              <button
+                type="button"
+                class="seg-btn active"
+                data-kind="book"
+                role="radio"
+                aria-checked="true"
+              >
+                Book
+              </button>
+              <button
+                type="button"
+                class="seg-btn"
+                data-kind="series"
+                role="radio"
+                aria-checked="false"
+              >
+                Series
+              </button>
+              <button
+                type="button"
+                class="seg-btn"
+                data-kind="author"
+                role="radio"
+                aria-checked="false"
+              >
+                Author
+              </button>
             </div>
-            <div id="dup-hint" class="hint hidden"></div>
 
-            <label for="author">Author</label>
+            <div id="title-block">
+              <label for="title" id="title-label">Book title</label>
+              <div class="lookup">
+                <input
+                  id="title"
+                  name="title"
+                  required
+                  maxlength="500"
+                  autocomplete="off"
+                  placeholder="Start typing to search books…"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-controls="suggestions"
+                />
+                <div
+                  id="suggestions"
+                  class="suggestions hidden"
+                  role="listbox"
+                ></div>
+              </div>
+              <div id="dup-hint" class="hint hidden"></div>
+            </div>
+
+            <label for="author" id="author-label">Author</label>
             <input
               id="author"
               name="author"
@@ -605,10 +664,13 @@
               autocomplete="off"
             />
 
-            <label for="isbn"
-              >ISBN <span class="optional">(auto-filled, optional)</span></label
-            >
-            <input id="isbn" name="isbn" maxlength="32" autocomplete="off" />
+            <div id="isbn-block">
+              <label for="isbn"
+                >ISBN
+                <span class="optional">(auto-filled, optional)</span></label
+              >
+              <input id="isbn" name="isbn" maxlength="32" autocomplete="off" />
+            </div>
 
             <input type="hidden" id="coverUrl" name="coverUrl" value="" />
 
@@ -772,6 +834,68 @@
       }
       $("rating").addEventListener("input", updateRating);
       updateRating();
+
+      // --- Entry kind: book (default), whole series, or an author ---
+      const KIND_UI = {
+        book: {
+          titleLabel: "Book title",
+          titlePlaceholder: "Start typing to search books…",
+          authorLabel: "Author",
+          liked: "What worked for you",
+          disliked: "What didn't",
+          notes: "Anything else worth remembering",
+        },
+        series: {
+          titleLabel: "Series name",
+          titlePlaceholder: "e.g. The Expanse",
+          authorLabel: "Author(s)",
+          liked: "What worked across the series",
+          disliked: "Where it faltered",
+          notes: "Favorite entries, reading-order tips…",
+        },
+        author: {
+          titleLabel: "",
+          titlePlaceholder: "",
+          authorLabel: "Author name",
+          liked: "What you love about their writing",
+          disliked: "What you don't",
+          notes: "Where to start, favorite works…",
+        },
+      };
+      let entryKind = "book";
+
+      function setKind(kind) {
+        entryKind = kind;
+        const ui = KIND_UI[kind];
+        for (const btn of document.querySelectorAll(".seg-btn")) {
+          const on = btn.dataset.kind === kind;
+          btn.classList.toggle("active", on);
+          btn.setAttribute("aria-checked", String(on));
+        }
+        // Author entries have no title field; disabled exempts it from the
+        // form's required-validation while hidden.
+        show($("title-block"), kind !== "author");
+        $("title").disabled = kind === "author";
+        $("title").required = kind !== "author";
+        $("title-label").textContent = ui.titleLabel;
+        $("title").placeholder = ui.titlePlaceholder;
+        $("author-label").textContent = ui.authorLabel;
+        show($("isbn-block"), kind === "book");
+        $("liked").placeholder = ui.liked;
+        $("disliked").placeholder = ui.disliked;
+        $("notes").placeholder = ui.notes;
+        hideSuggestions();
+        if (kind !== "book") {
+          $("coverUrl").value = "";
+          $("isbn").value = "";
+          show($("dup-hint"), false);
+        } else {
+          checkDuplicate();
+        }
+      }
+      for (const btn of document.querySelectorAll(".seg-btn")) {
+        btn.addEventListener("click", () => setKind(btn.dataset.kind));
+      }
 
       // Local today as YYYY-MM-DD; defaultValue survives form.reset().
       const today = new Date();
@@ -937,7 +1061,7 @@
         $("coverUrl").value = ""; // manual edits invalidate the picked cover
         checkDuplicate();
         const q = $("title").value.trim();
-        if (q.length < 3) {
+        if (q.length < 3 || entryKind !== "book") {
           hideSuggestions();
           return;
         }
@@ -1120,6 +1244,10 @@
           .replace(/[.!?…]+$/, "");
 
       function checkDuplicate() {
+        if (entryKind !== "book") {
+          show($("dup-hint"), false);
+          return;
+        }
         const q = normTitle($("title").value);
         const hit = q && allEntries.find((e) => normTitle(e.title) === q);
         if (hit) {
@@ -1253,6 +1381,7 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              kind: entryKind,
               title: $("title").value,
               author: $("author").value,
               rating: Number($("rating").value),

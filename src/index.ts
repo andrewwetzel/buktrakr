@@ -244,15 +244,30 @@ export function validateEntry(body: unknown): Entry | null {
       : typeof v === "string" && v.length <= 5000
         ? v.trim()
         : null;
-  const title = requiredStr(b.title, 500);
-  const author = requiredStr(b.author, 500);
+  // What's being reviewed: a single book (default), a whole series, or an
+  // author. Series/author entries carry a marker in the stored title so the
+  // doc/sheet format (and every parser) stays unchanged.
+  const kind =
+    b.kind === "series" || b.kind === "author" ? b.kind : ("book" as const);
+  let title: string | null;
+  let author: string | null;
+  if (kind === "author") {
+    const name = requiredStr(b.author, 500);
+    title = name ? `${name} (author)` : null;
+    author = "";
+  } else {
+    const base = requiredStr(b.title, 500);
+    title = base ? (kind === "series" ? `${base} (series)` : base) : null;
+    author = requiredStr(b.author, 500);
+  }
   const rating = b.rating;
   const liked = optionalStr(b.liked);
   const disliked = optionalStr(b.disliked);
   const notes = optionalStr(b.notes);
   if (
     !title ||
-    !author ||
+    author === null ||
+    (kind !== "author" && !author) ||
     liked === null ||
     disliked === null ||
     notes === null
@@ -266,8 +281,9 @@ export function validateEntry(body: unknown): Entry | null {
   ) {
     return null;
   }
+  // ISBN and cover only make sense for a single book.
   const isbn =
-    typeof b.isbn === "string" && b.isbn.length <= 32
+    kind === "book" && typeof b.isbn === "string" && b.isbn.length <= 32
       ? b.isbn.replace(/[^0-9Xx-]/g, "")
       : "";
   // "Date read" — lenient: anything malformed falls back to today.
@@ -279,7 +295,11 @@ export function validateEntry(body: unknown): Entry | null {
   }
   // Only cover URLs from the book APIs may be embedded into users' docs.
   let coverUrl = "";
-  if (typeof b.coverUrl === "string" && b.coverUrl.length <= 500) {
+  if (
+    kind === "book" &&
+    typeof b.coverUrl === "string" &&
+    b.coverUrl.length <= 500
+  ) {
     try {
       const u = new URL(b.coverUrl);
       const host = u.hostname;
