@@ -656,13 +656,23 @@
             </div>
 
             <label for="author" id="author-label">Author</label>
-            <input
-              id="author"
-              name="author"
-              required
-              maxlength="500"
-              autocomplete="off"
-            />
+            <div class="lookup">
+              <input
+                id="author"
+                name="author"
+                required
+                maxlength="500"
+                autocomplete="off"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="author-suggestions"
+              />
+              <div
+                id="author-suggestions"
+                class="suggestions hidden"
+                role="listbox"
+              ></div>
+            </div>
 
             <div id="isbn-block">
               <label for="isbn"
@@ -906,69 +916,125 @@
       ].join("-");
       $("entryDate").max = $("entryDate").defaultValue;
 
-      // --- Book autocomplete via the Google Books API (keyless, CORS-open) ---
-      let searchTimer = null;
-      let searchAbort = null;
+      // --- Autocomplete lookups (all keyless, CORS-open, best-effort) ---
+      // Generic combobox; items are { primary, meta, img?, pick }.
+      function makeLookup(inputId, boxId) {
+        const input = $(inputId);
+        const box = $(boxId);
+        const st = { active: -1, timer: null, abort: null };
 
-      let activeIndex = -1;
+        function hide() {
+          show(box, false);
+          input.setAttribute("aria-expanded", "false");
+          input.removeAttribute("aria-activedescendant");
+          st.active = -1;
+        }
 
-      function hideSuggestions() {
-        show($("suggestions"), false);
-        $("title").setAttribute("aria-expanded", "false");
-        $("title").removeAttribute("aria-activedescendant");
-        activeIndex = -1;
-      }
+        function setActive(i) {
+          const opts = box.querySelectorAll("button");
+          if (!opts.length) return;
+          st.active = (i + opts.length) % opts.length;
+          opts.forEach((o, idx) =>
+            o.classList.toggle("active", idx === st.active),
+          );
+          opts[st.active].scrollIntoView({ block: "nearest" });
+          input.setAttribute("aria-activedescendant", opts[st.active].id);
+        }
 
-      function setActive(i) {
-        const opts = $("suggestions").querySelectorAll("button");
-        if (!opts.length) return;
-        activeIndex = (i + opts.length) % opts.length;
-        opts.forEach((o, idx) =>
-          o.classList.toggle("active", idx === activeIndex),
-        );
-        opts[activeIndex].scrollIntoView({ block: "nearest" });
-        $("title").setAttribute("aria-activedescendant", opts[activeIndex].id);
-      }
-
-      // Normalized suggestion shape: { title, authors, year, isbn, cover }
-      function renderSuggestions(books) {
-        const box = $("suggestions");
-        box.textContent = "";
-        activeIndex = -1;
-        books.forEach((b, idx) => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.id = `sugg-${idx}`;
-          btn.setAttribute("role", "option");
-          if (b.cover) {
-            const img = document.createElement("img");
-            img.src = b.cover;
-            img.alt = "";
-            img.loading = "lazy";
-            btn.append(img);
-          }
-          const txt = document.createElement("span");
-          txt.textContent = b.title;
-          const meta = document.createElement("span");
-          meta.className = "s-meta";
-          meta.textContent =
-            [b.authors, b.year].filter(Boolean).join(" · ") || "Unknown author";
-          txt.append(meta);
-          btn.append(txt);
-          btn.addEventListener("click", () => {
-            $("title").value = b.title;
-            $("author").value = b.authors;
-            $("isbn").value = b.isbn;
-            $("coverUrl").value = b.cover;
-            hideSuggestions();
-            checkDuplicate();
-            $("rating").focus();
+        function render(items) {
+          box.textContent = "";
+          st.active = -1;
+          items.forEach((it, idx) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.id = `${boxId}-${idx}`;
+            btn.setAttribute("role", "option");
+            if (it.img) {
+              const img = document.createElement("img");
+              img.src = it.img;
+              img.alt = "";
+              img.loading = "lazy";
+              btn.append(img);
+            }
+            const txt = document.createElement("span");
+            txt.textContent = it.primary;
+            const meta = document.createElement("span");
+            meta.className = "s-meta";
+            meta.textContent = it.meta || "";
+            txt.append(meta);
+            btn.append(txt);
+            btn.addEventListener("click", () => {
+              hide();
+              it.pick();
+            });
+            box.append(btn);
           });
-          box.append(btn);
+          show(box, items.length > 0);
+          input.setAttribute("aria-expanded", String(items.length > 0));
+        }
+
+        // Debounced search: searcher(q, signal) resolves to items.
+        function schedule(searcher, q) {
+          clearTimeout(st.timer);
+          st.timer = setTimeout(async () => {
+            if (st.abort) st.abort.abort();
+            st.abort = new AbortController();
+            const signal = st.abort.signal;
+            try {
+              const items = await searcher(q, signal);
+              if (!signal.aborted) render(items);
+            } catch {
+              // Aborted or offline — autocomplete is best-effort.
+            }
+          }, 300);
+        }
+
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            hide();
+            return;
+          }
+          if (box.classList.contains("hidden")) return;
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActive(st.active + 1);
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActive(st.active - 1);
+          } else if (e.key === "Enter" && st.active >= 0) {
+            e.preventDefault();
+            box.querySelectorAll("button")[st.active].click();
+          }
         });
-        show(box, books.length > 0);
-        $("title").setAttribute("aria-expanded", String(books.length > 0));
+
+        return { hide, schedule };
       }
+
+      const titleLookup = makeLookup("title", "suggestions");
+      const authorLookup = makeLookup("author", "author-suggestions");
+      function hideSuggestions() {
+        titleLookup.hide();
+        authorLookup.hide();
+      }
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".lookup")) hideSuggestions();
+      });
+
+      // -- Books: Google Books, falling back to Open Library --
+      const bookItem = (b) => ({
+        img: b.cover,
+        primary: b.title,
+        meta:
+          [b.authors, b.year].filter(Boolean).join(" · ") || "Unknown author",
+        pick: () => {
+          $("title").value = b.title;
+          $("author").value = b.authors;
+          $("isbn").value = b.isbn;
+          $("coverUrl").value = b.cover;
+          checkDuplicate();
+          $("rating").focus();
+        },
+      });
 
       async function searchGoogleBooks(q, signal) {
         const params = new URLSearchParams({
@@ -1036,56 +1102,106 @@
           });
       }
 
-      async function searchBooks(q) {
-        if (searchAbort) searchAbort.abort();
-        searchAbort = new AbortController();
-        const signal = searchAbort.signal;
+      async function searchBooks(q, signal) {
+        let books = [];
         try {
-          let books = [];
-          try {
-            books = await searchGoogleBooks(q, signal);
-          } catch (err) {
-            if (signal.aborted) return;
-            // Google Books keyless quota is per-IP and can run out; Open
-            // Library covers the gap.
-            books = await searchOpenLibrary(q, signal);
-          }
-          if (!signal.aborted) renderSuggestions(books);
-        } catch {
-          // Aborted or offline — autocomplete is best-effort; typing still works.
+          books = await searchGoogleBooks(q, signal);
+        } catch (err) {
+          if (signal.aborted) return [];
+          // Google Books keyless quota is per-IP and can run out; Open
+          // Library covers the gap.
+          books = await searchOpenLibrary(q, signal);
         }
+        return books.map(bookItem);
+      }
+
+      // -- Series: Wikidata entity search, filtered to series-like items --
+      async function searchSeries(q, signal) {
+        const params = new URLSearchParams({
+          action: "wbsearchentities",
+          search: q,
+          language: "en",
+          uselang: "en",
+          type: "item",
+          limit: "10",
+          format: "json",
+          origin: "*",
+        });
+        const res = await fetch(
+          `https://www.wikidata.org/w/api.php?${params}`,
+          { signal },
+        );
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        return (data.search || [])
+          .filter(
+            (s) =>
+              s.label &&
+              /\b(series|trilogy|saga|sequence|novels)\b/i.test(
+                s.description || "",
+              ),
+          )
+          .slice(0, 6)
+          .map((s) => ({
+            primary: s.label,
+            meta: s.description || "",
+            pick: () => {
+              $("title").value = s.label.replace(
+                /\s*\((?:book |novel )?series\)\s*$/i,
+                "",
+              );
+              const by = (s.description || "").match(/\bby (.+)$/i);
+              if (by && !$("author").value.trim()) {
+                $("author").value = by[1].trim();
+              }
+              if ($("author").value.trim()) $("rating").focus();
+              else $("author").focus();
+            },
+          }));
+      }
+
+      // -- Authors: Open Library's dedicated author search --
+      async function searchAuthors(q, signal) {
+        const params = new URLSearchParams({ q, limit: "6" });
+        const res = await fetch(
+          `https://openlibrary.org/search/authors.json?${params}`,
+          { signal },
+        );
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        return (data.docs || [])
+          .filter((d) => d && d.name)
+          .map((d) => ({
+            primary: d.name,
+            meta: [d.top_work, d.work_count ? `${d.work_count} works` : ""]
+              .filter(Boolean)
+              .join(" · "),
+            pick: () => {
+              $("author").value = d.name;
+              $("rating").focus();
+            },
+          }));
       }
 
       $("title").addEventListener("input", () => {
-        clearTimeout(searchTimer);
         $("coverUrl").value = ""; // manual edits invalidate the picked cover
         checkDuplicate();
         const q = $("title").value.trim();
-        if (q.length < 3 || entryKind !== "book") {
-          hideSuggestions();
+        if (q.length < 3) {
+          titleLookup.hide();
           return;
         }
-        searchTimer = setTimeout(() => searchBooks(q), 300);
+        if (entryKind === "book") titleLookup.schedule(searchBooks, q);
+        else if (entryKind === "series") titleLookup.schedule(searchSeries, q);
+        else titleLookup.hide();
       });
-      $("title").addEventListener("keydown", (e) => {
-        if (e.key === "Escape") {
-          hideSuggestions();
+      $("author").addEventListener("input", () => {
+        const q = $("author").value.trim();
+        if (entryKind !== "author" || q.length < 3) {
+          authorLookup.hide();
           return;
         }
-        if ($("suggestions").classList.contains("hidden")) return;
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setActive(activeIndex + 1);
-        } else if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setActive(activeIndex - 1);
-        } else if (e.key === "Enter" && activeIndex >= 0) {
-          e.preventDefault();
-          $("suggestions").querySelectorAll("button")[activeIndex].click();
-        }
-      });
-      document.addEventListener("click", (e) => {
-        if (!e.target.closest(".lookup")) hideSuggestions();
+        authorLookup.schedule(searchAuthors, q);
       });
 
       function setMessage(text, kind) {
