@@ -2,6 +2,11 @@
 // Both work under the drive.file scope because the app creates the doc.
 
 export const DOC_TITLE = "BukTrakr — Book Reviews";
+export const DOC_MIME = "application/vnd.google-apps.document";
+
+/** Doc styling templates users can pick in Settings. */
+export const STYLE_IDS = ["classic", "minimal", "vintage"] as const;
+export type StyleId = (typeof STYLE_IDS)[number];
 
 /** The doc was deleted from Drive; caller should create a fresh one and retry. */
 export class DocNotFoundError extends Error {}
@@ -26,14 +31,14 @@ function authHeaders(accessToken: string): Record<string, string> {
   };
 }
 
-export async function createDoc(accessToken: string): Promise<string> {
+export async function createDoc(
+  accessToken: string,
+  name: string,
+): Promise<string> {
   const res = await fetch("https://www.googleapis.com/drive/v3/files", {
     method: "POST",
     headers: authHeaders(accessToken),
-    body: JSON.stringify({
-      name: DOC_TITLE,
-      mimeType: "application/vnd.google-apps.document",
-    }),
+    body: JSON.stringify({ name, mimeType: DOC_MIME }),
   });
   if (!res.ok) throw new Error(`Doc creation failed: ${res.status}`);
   const body = (await res.json()) as { id?: string };
@@ -41,17 +46,89 @@ export async function createDoc(accessToken: string): Promise<string> {
   return body.id;
 }
 
+/** Renames a Drive file (doc or spreadsheet). */
+export async function renameFile(
+  accessToken: string,
+  fileId: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(accessToken),
+      body: JSON.stringify({ name }),
+    },
+  );
+  if (res.status === 404) throw new DocNotFoundError();
+  if (!res.ok) throw new Error(`Rename failed: ${res.status}`);
+}
+
+// App-private Drive file metadata (appProperties) — how settings sync across
+// devices: the active destination file carries the flag + style, its name is
+// the display name, and sign-in reads it all back. drive.file covers this.
+export const PROP_ACTIVE = "buktrakrActive";
+export const PROP_STYLE = "buktrakrStyle";
+
+export interface DriveFileInfo {
+  id: string;
+  mimeType: string;
+  name: string;
+  appProperties?: Record<string, string>;
+}
+
+/** All files this app created (docs + sheets), oldest first. */
+export async function listAppFiles(
+  accessToken: string,
+): Promise<DriveFileInfo[]> {
+  const params = new URLSearchParams({
+    q: "trashed = false",
+    orderBy: "createdTime",
+    pageSize: "10",
+    fields: "files(id,mimeType,name,appProperties)",
+  });
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?${params}`,
+    { headers: authHeaders(accessToken) },
+  );
+  if (!res.ok) throw new Error(`Drive list failed: ${res.status}`);
+  const body = (await res.json()) as { files?: DriveFileInfo[] };
+  return (body.files ?? []).filter((f) => f.id && f.mimeType);
+}
+
+/** Sets (or with null values, removes) app-private properties on a file. */
+export async function setFileProps(
+  accessToken: string,
+  fileId: string,
+  props: Record<string, string | null>,
+): Promise<void> {
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(accessToken),
+      body: JSON.stringify({ appProperties: props }),
+    },
+  );
+  if (res.status === 404) throw new DocNotFoundError();
+  if (!res.ok) throw new Error(`Props update failed: ${res.status}`);
+}
+
 export function docUrl(docId: string): string {
   return `https://docs.google.com/document/d/${docId}/edit`;
 }
 
 /**
- * Finds the reviews doc among files this app created (all drive.file lets it
- * see), so a sign-in from a fresh browser reuses the existing doc instead of
- * creating a duplicate. Returns the oldest match or null.
+ * Finds the reviews destination among files this app created (all drive.file
+ * lets it see), so a sign-in from a fresh browser reuses the existing file
+ * instead of creating a duplicate. Matches by type only — custom names are
+ * still rediscovered. Returns the oldest match or null.
  */
-export async function findDoc(accessToken: string): Promise<string | null> {
-  const q = `name = '${DOC_TITLE}' and mimeType = 'application/vnd.google-apps.document' and trashed = false`;
+export async function findFile(
+  accessToken: string,
+  mimeType: string,
+): Promise<string | null> {
+  const q = `mimeType = '${mimeType}' and trashed = false`;
   const params = new URLSearchParams({
     q,
     orderBy: "createdTime",
@@ -121,6 +198,7 @@ export async function appendEntry(
   accessToken: string,
   docId: string,
   entry: Entry,
+  style: StyleId = "classic",
 ): Promise<void> {
   // The read-then-write pair races with concurrent edits to the doc, so the
   // batch carries writeControl.requiredRevisionId and gets one retry.
@@ -132,9 +210,79 @@ export async function appendEntry(
       entry,
       endIndex - 1,
       revisionId,
+      style,
     );
     if (done) return;
     if (attempt >= 1) throw new Error("Doc append failed: revision conflict");
+  }
+}
+
+interface Range {
+  start: number;
+  end: number;
+}
+
+/**
+ * Per-template styling requests. Every template styles the same four pieces
+ * (title paragraph, meta line, section labels, whole block) differently.
+ */
+function styleRequests(
+  style: StyleId,
+  titleR: Range,
+  metaR: Range,
+  labelRs: Range[],
+  blockEnd: number,
+): unknown[] {
+  const para = (r: Range, namedStyleType: string) => ({
+    updateParagraphStyle: {
+      range: { startIndex: r.start, endIndex: r.end },
+      paragraphStyle: { namedStyleType },
+      fields: "namedStyleType",
+    },
+  });
+  const text = (r: Range, textStyle: Record<string, unknown>) => ({
+    updateTextStyle: {
+      range: { startIndex: r.start, endIndex: r.end },
+      textStyle,
+      fields: Object.keys(textStyle).join(","),
+    },
+  });
+  const green = {
+    color: { rgbColor: { red: 0.23, green: 0.43, blue: 0.31 } },
+  };
+  const grey = { color: { rgbColor: { red: 0.45, green: 0.42, blue: 0.38 } } };
+  // The block after the title is explicitly NORMAL_TEXT in every template so
+  // nothing inherits heading style.
+  const rest: Range = { start: titleR.end + 1, end: blockEnd };
+
+  switch (style) {
+    case "minimal":
+      return [
+        para({ start: titleR.start, end: titleR.end + 1 }, "NORMAL_TEXT"),
+        para(rest, "NORMAL_TEXT"),
+        text(titleR, { bold: true, fontSize: { magnitude: 13, unit: "PT" } }),
+        text(metaR, { italic: true, foregroundColor: grey }),
+        ...labelRs.map((r) => text(r, { bold: true })),
+      ];
+    case "vintage":
+      return [
+        para({ start: titleR.start, end: titleR.end + 1 }, "HEADING_2"),
+        para(rest, "NORMAL_TEXT"),
+        text(titleR, {
+          foregroundColor: green,
+          weightedFontFamily: { fontFamily: "Playfair Display" },
+        }),
+        text(metaR, { italic: true }),
+        ...labelRs.map((r) => text(r, { bold: true, smallCaps: true })),
+      ];
+    case "classic":
+    default:
+      return [
+        para({ start: titleR.start, end: titleR.end + 1 }, "HEADING_2"),
+        para(rest, "NORMAL_TEXT"),
+        text(metaR, { italic: true }),
+        ...labelRs.map((r) => text(r, { bold: true })),
+      ];
   }
 }
 
@@ -145,6 +293,7 @@ async function tryAppendAt(
   entry: Entry,
   insertAt: number,
   revisionId: string,
+  style: StyleId,
 ): Promise<boolean> {
   const body = (s: string): string => neutralizeMetaLookalikes(clean(s)) || "—";
   const hasCover = Boolean(entry.coverUrl);
@@ -184,35 +333,7 @@ async function tryAppendAt(
 
   const requests = [
     { insertText: { location: { index: insertAt }, text } },
-    {
-      updateParagraphStyle: {
-        range: { startIndex: titleR.start, endIndex: titleR.end + 1 },
-        paragraphStyle: { namedStyleType: "HEADING_2" },
-        fields: "namedStyleType",
-      },
-    },
-    // Explicit NORMAL_TEXT so the rest never inherits heading style.
-    {
-      updateParagraphStyle: {
-        range: { startIndex: titleR.end + 1, endIndex: blockEnd },
-        paragraphStyle: { namedStyleType: "NORMAL_TEXT" },
-        fields: "namedStyleType",
-      },
-    },
-    {
-      updateTextStyle: {
-        range: { startIndex: metaR.start, endIndex: metaR.end },
-        textStyle: { italic: true },
-        fields: "italic",
-      },
-    },
-    ...labelRs.map((r) => ({
-      updateTextStyle: {
-        range: { startIndex: r.start, endIndex: r.end },
-        textStyle: { bold: true },
-        fields: "bold",
-      },
-    })),
+    ...styleRequests(style, titleR, metaR, labelRs, blockEnd),
   ];
 
   const res = await fetch(

@@ -14,12 +14,31 @@ import {
   appendEntry,
   createDoc,
   docUrl,
-  findDoc,
+  findFile,
   getDocText,
   parseEntries,
+  listAppFiles,
+  renameFile,
+  setFileProps,
   DocNotFoundError,
+  DOC_MIME,
+  DOC_TITLE,
+  PROP_ACTIVE,
+  PROP_STYLE,
+  STYLE_IDS,
   type Entry,
+  type ParsedEntry,
+  type StyleId,
 } from "./docs";
+import {
+  appendRow,
+  createSheet,
+  readRows,
+  rowsToText,
+  sheetUrl,
+  SHEET_MIME,
+} from "./sheets";
+import type { DestMode } from "./session";
 
 export interface Env {
   GOOGLE_CLIENT_ID: string;
@@ -100,19 +119,96 @@ async function requireAuth(
   }
 }
 
-/** The user's doc id and full text, or null when there is no (surviving) doc. */
-async function readUserDoc(
+/** Link to the active destination file, if known. */
+function destUrl(session: SessionData): string | null {
+  if (session.mode === "sheet") {
+    return session.sheetId ? sheetUrl(session.sheetId) : null;
+  }
+  return session.docId ? docUrl(session.docId) : null;
+}
+
+/**
+ * Reads the active destination (doc or sheet): its parsed entries plus a
+ * plain-text rendering for the export. Null when no (surviving) file exists.
+ */
+async function readDestination(
   session: SessionData,
   accessToken: string,
-): Promise<{ docId: string; text: string } | null> {
-  const docId = session.docId ?? (await findDoc(accessToken));
-  if (!docId) return null;
+): Promise<{ id: string; text: string; entries: ParsedEntry[] } | null> {
   try {
-    return { docId, text: await getDocText(accessToken, docId) };
+    if (session.mode === "sheet") {
+      const id = session.sheetId ?? (await findFile(accessToken, SHEET_MIME));
+      if (!id) return null;
+      const rows = await readRows(accessToken, id);
+      return { id, text: rowsToText(rows), entries: rows };
+    }
+    const id = session.docId ?? (await findFile(accessToken, DOC_MIME));
+    if (!id) return null;
+    const text = await getDocText(accessToken, id);
+    return { id, text, entries: parseEntries(text) };
   } catch (err) {
     if (err instanceof DocNotFoundError) return null;
     throw err;
   }
+}
+
+export interface Settings {
+  mode: DestMode;
+  docName: string;
+  style: StyleId;
+}
+
+/**
+ * Settings recovered from Drive file metadata — the cross-device source of
+ * truth, read back at each sign-in. Null fields mean "nothing stored".
+ */
+interface Discovered {
+  docId: string | null;
+  sheetId: string | null;
+  mode: DestMode | null;
+  docName: string | null;
+  style: StyleId | null;
+}
+
+async function discoverState(accessToken: string): Promise<Discovered> {
+  const files = await listAppFiles(accessToken);
+  const doc = files.find((f) => f.mimeType === DOC_MIME) ?? null;
+  const sheet = files.find((f) => f.mimeType === SHEET_MIME) ?? null;
+  const flagged =
+    files.find((f) => f.appProperties?.[PROP_ACTIVE] === "1") ?? null;
+  const nameSource = flagged ?? doc ?? sheet;
+  const styleRaw = flagged?.appProperties?.[PROP_STYLE];
+  return {
+    docId: doc?.id ?? null,
+    sheetId: sheet?.id ?? null,
+    mode: flagged ? (flagged.mimeType === SHEET_MIME ? "sheet" : "doc") : null,
+    docName: nameSource?.name ?? null,
+    style: STYLE_IDS.includes(styleRaw as StyleId)
+      ? (styleRaw as StyleId)
+      : null,
+  };
+}
+
+/** Marks a file as the active destination, recording the style with it. */
+async function markActive(
+  accessToken: string,
+  fileId: string,
+  style: StyleId,
+): Promise<void> {
+  await setFileProps(accessToken, fileId, {
+    [PROP_ACTIVE]: "1",
+    [PROP_STYLE]: style,
+  });
+}
+
+export function validateSettings(body: unknown): Settings | null {
+  if (typeof body !== "object" || body === null) return null;
+  const b = body as Record<string, unknown>;
+  if (b.mode !== "doc" && b.mode !== "sheet") return null;
+  if (!STYLE_IDS.includes(b.style as StyleId)) return null;
+  if (typeof b.docName !== "string" || b.docName.length > 128) return null;
+  const docName = b.docName.replace(/\s+/g, " ").trim() || DOC_TITLE;
+  return { mode: b.mode, docName, style: b.style as StyleId };
 }
 
 export function validateEntry(body: unknown): Entry | null {
@@ -215,7 +311,12 @@ export default {
           return json({
             signedIn: true,
             email: session.email,
-            docUrl: session.docId ? docUrl(session.docId) : null,
+            docUrl: destUrl(session),
+            settings: {
+              mode: session.mode,
+              docName: session.docName,
+              style: session.style,
+            },
           });
         }
 
@@ -257,7 +358,7 @@ export default {
             return redirect(`${url.origin}/?error=oauth`, [clearState]);
           }
 
-          const { refreshToken, claims } = await exchangeCode(
+          const { accessToken, refreshToken, claims } = await exchangeCode(
             env,
             `${url.origin}/auth/callback`,
             code,
@@ -276,13 +377,28 @@ export default {
             ]);
           }
 
+          // Cross-device settings sync: read the state stored on the user's
+          // Drive files. Best-effort — sign-in must not fail on a Drive blip.
+          let disc: Discovered | null = null;
+          if (accessToken) {
+            try {
+              disc = await discoverState(accessToken);
+            } catch {
+              disc = null;
+            }
+          }
+
           return redirect(`${url.origin}/`, [
             clearState,
             await sessionCookie(env, {
               sub: claims.sub,
               email: claims.email ?? "",
               refreshToken: effectiveToken,
-              docId: carried?.docId ?? null,
+              docId: disc?.docId ?? carried?.docId ?? null,
+              sheetId: disc?.sheetId ?? carried?.sheetId ?? null,
+              mode: disc?.mode ?? carried?.mode ?? "doc",
+              docName: disc?.docName ?? carried?.docName ?? DOC_TITLE,
+              style: disc?.style ?? carried?.style ?? "classic",
             }),
           ]);
         }
@@ -294,35 +410,95 @@ export default {
           const entry = validateEntry(await request.json().catch(() => null));
           if (!entry) return json({ error: "invalid_entry" }, 400);
 
-          // Cookie may not know the doc (fresh browser): find the one this
-          // app created earlier, or create it.
-          let docId =
-            session.docId ??
-            (await findDoc(accessToken)) ??
-            (await createDoc(accessToken));
+          const sheetMode = session.mode === "sheet";
+          const mime = sheetMode ? SHEET_MIME : DOC_MIME;
+          const create = async (): Promise<string> => {
+            const id = sheetMode
+              ? await createSheet(accessToken, session.docName)
+              : await createDoc(accessToken, session.docName);
+            // Record the active flag + style so other devices adopt this
+            // file at sign-in. Best-effort.
+            await markActive(accessToken, id, session.style).catch(() => {});
+            return id;
+          };
+          const append = (id: string): Promise<void> =>
+            sheetMode
+              ? appendRow(accessToken, id, entry)
+              : appendEntry(accessToken, id, entry, session.style);
+
+          // Cookie may not know the destination (fresh browser): find the one
+          // this app created earlier, or create it.
+          let fileId =
+            (sheetMode ? session.sheetId : session.docId) ??
+            (await findFile(accessToken, mime)) ??
+            (await create());
           try {
-            await appendEntry(accessToken, docId, entry);
+            await append(fileId);
           } catch (err) {
             if (!(err instanceof DocNotFoundError)) throw err;
-            // Stale id (doc deleted in Drive): rediscover or recreate, retry once.
-            docId =
-              (await findDoc(accessToken)) ?? (await createDoc(accessToken));
-            await appendEntry(accessToken, docId, entry);
+            // Stale id (file deleted in Drive): rediscover or recreate, retry once.
+            fileId = (await findFile(accessToken, mime)) ?? (await create());
+            await append(fileId);
           }
 
-          // Re-issue the cookie so it remembers the doc (and rolls the expiry).
-          return json({ ok: true, docUrl: docUrl(docId) }, 200, [
-            await sessionCookie(env, { ...session, docId }),
+          // Re-issue the cookie so it remembers the file (and rolls the expiry).
+          const updated: SessionData = sheetMode
+            ? { ...session, sheetId: fileId }
+            : { ...session, docId: fileId };
+          return json({ ok: true, docUrl: destUrl(updated) }, 200, [
+            await sessionCookie(env, updated),
+          ]);
+        }
+
+        case "POST /api/settings": {
+          const auth = await requireAuth(request, env);
+          if (auth instanceof Response) return auth;
+          const { session, accessToken } = auth;
+          const settings = validateSettings(
+            await request.json().catch(() => null),
+          );
+          if (!settings) return json({ error: "invalid_settings" }, 400);
+
+          const updated: SessionData = { ...session, ...settings };
+          // Apply the name + active flag + style to the destination file if
+          // it already exists (rediscover it if this cookie doesn't know it).
+          const mime = settings.mode === "sheet" ? SHEET_MIME : DOC_MIME;
+          const known =
+            settings.mode === "sheet" ? updated.sheetId : updated.docId;
+          const fileId = known ?? (await findFile(accessToken, mime));
+          if (fileId) {
+            try {
+              await renameFile(accessToken, fileId, settings.docName);
+              await markActive(accessToken, fileId, settings.style);
+              if (settings.mode === "sheet") updated.sheetId = fileId;
+              else updated.docId = fileId;
+            } catch (err) {
+              if (!(err instanceof DocNotFoundError)) throw err;
+              // Stale id — forget it; the next submission recreates the file.
+              if (settings.mode === "sheet") updated.sheetId = null;
+              else updated.docId = null;
+            }
+          }
+          // The other-mode file, if any, loses the active flag so sign-ins
+          // elsewhere adopt the right destination. Best-effort.
+          const otherId =
+            settings.mode === "sheet" ? updated.docId : updated.sheetId;
+          if (otherId) {
+            await setFileProps(accessToken, otherId, {
+              [PROP_ACTIVE]: null,
+            }).catch(() => {});
+          }
+
+          return json({ ok: true, settings, docUrl: destUrl(updated) }, 200, [
+            await sessionCookie(env, updated),
           ]);
         }
 
         case "GET /api/recent": {
           const auth = await requireAuth(request, env);
           if (auth instanceof Response) return auth;
-          const doc = await readUserDoc(auth.session, auth.accessToken);
-          if (!doc) return json({ entries: [], stats: null });
-
-          const entries = parseEntries(doc.text);
+          const dest = await readDestination(auth.session, auth.accessToken);
+          const entries = dest?.entries ?? [];
           if (entries.length === 0) return json({ entries: [], stats: null });
           const year = new Date().toISOString().slice(0, 4);
           const stats = {
@@ -340,8 +516,8 @@ export default {
         case "GET /api/export": {
           const auth = await requireAuth(request, env);
           if (auth instanceof Response) return auth;
-          const doc = await readUserDoc(auth.session, auth.accessToken);
-          let log = doc?.text.trim() ?? "";
+          const dest = await readDestination(auth.session, auth.accessToken);
+          let log = dest?.text.trim() ?? "";
           if (!log) return json({ error: "no_doc" }, 404);
 
           // Keep the prompt pasteable: trim to the most recent entries.

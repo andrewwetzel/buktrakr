@@ -23,8 +23,9 @@ and three secrets:
 ### 1. Google Cloud (console.cloud.google.com)
 
 1. Create a project (e.g. `buktrakr`).
-2. **APIs & Services → Library**: enable **Google Drive API** and
-   **Google Docs API**.
+2. **APIs & Services → Library**: enable **Google Drive API**,
+   **Google Docs API**, and **Google Sheets API** (the last one powers the
+   optional spreadsheet destination).
 3. **OAuth consent screen**: user type **External**, add the scopes
    `openid`, `.../auth/userinfo.email`, and
    `https://www.googleapis.com/auth/drive.file`.
@@ -83,6 +84,14 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
 - **Recently logged + duplicate hint**: the app parses your doc to show your
   last five entries with quick stats, and warns (without blocking) when a
   title you're entering matches something you already logged.
+- **Customizable destination (Settings)**: each user can rename their
+  reviews file, pick a doc styling template (Classic, Minimal, or Vintage —
+  applied to new entries), or switch the destination to a **Google Sheet**
+  (one row per book with a frozen, bold header row; review text is written
+  as literal values so it can never be interpreted as formulas). Settings
+  sync across devices with no server storage: they're written to the user's
+  own Drive files as app-private `appProperties` (active-destination flag +
+  style; the file's name is the display name) and read back at each sign-in.
 - **Installable (PWA)**: a web manifest and icons mean you can Add to Home
   Screen on a phone and it launches full-screen like a native app. There is
   deliberately no service worker — every action needs Google's APIs, so an
@@ -103,6 +112,11 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
   which re-runs the OAuth flow with `prompt=consent`.
 - **User deletes the doc in Drive**: the next submission gets a 404 from the
   Docs API; the Worker rediscovers or recreates the doc and retries once.
+- **Settings sync at sign-in**: the cookie caches your settings between
+  sign-ins; the durable copy lives on your Drive files. A new browser picks
+  everything up the moment you sign in. Switching destination never touches
+  the other file, and each device applies setting changes made elsewhere the
+  next time it signs in.
 - **Sign out** clears the session cookie in that browser only — by design
   there is no server-side session store to invalidate. **Disconnect** is the
   real revocation: it invalidates the Google refresh token itself, killing

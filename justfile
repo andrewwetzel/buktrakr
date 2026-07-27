@@ -48,8 +48,8 @@ setup:
 
     A. Google Cloud (console.cloud.google.com)
        1. Create a project (e.g. "buktrakr").
-       2. APIs & Services -> Library: enable "Google Drive API" and
-          "Google Docs API".
+       2. APIs & Services -> Library: enable "Google Drive API",
+          "Google Docs API", and "Google Sheets API".
        3. OAuth consent screen: External; scopes openid, userinfo.email,
           and https://www.googleapis.com/auth/drive.file
        4. Publish the consent screen to PRODUCTION (all scopes are

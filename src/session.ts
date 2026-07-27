@@ -3,12 +3,25 @@
 // Confidentiality matters here because the payload carries the user's Google
 // refresh token: nothing is stored server-side at all.
 
+import { DOC_TITLE, STYLE_IDS, type StyleId } from "./docs";
+
+export type DestMode = "doc" | "sheet";
+
 export interface SessionData {
   /** Google account's stable id ("sub" claim) — the user key. */
   sub: string;
   email: string;
   refreshToken: string;
+  /** Doc-mode destination file, when known. */
   docId: string | null;
+  /** Sheet-mode destination file, when known. */
+  sheetId: string | null;
+  /** Where entries go. Defaults keep pre-existing cookies valid. */
+  mode: DestMode;
+  /** Custom destination file name. */
+  docName: string;
+  /** Doc styling template. */
+  style: StyleId;
 }
 
 const enc = new TextEncoder();
@@ -84,6 +97,15 @@ export async function verifySessionToken(
       email: data.email,
       refreshToken: data.refreshToken,
       docId: typeof data.docId === "string" ? data.docId : null,
+      sheetId: typeof data.sheetId === "string" ? data.sheetId : null,
+      mode: data.mode === "sheet" ? "sheet" : "doc",
+      docName:
+        typeof data.docName === "string" && data.docName.trim()
+          ? data.docName
+          : DOC_TITLE,
+      style: STYLE_IDS.includes(data.style as StyleId)
+        ? (data.style as StyleId)
+        : "classic",
     };
   } catch {
     return null;

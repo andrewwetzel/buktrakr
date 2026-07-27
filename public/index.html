@@ -228,6 +228,22 @@
         margin-top: 0.35rem;
         font-style: italic;
       }
+      .choice-row {
+        display: flex;
+        gap: 1.25rem;
+        flex-wrap: wrap;
+      }
+      label.choice {
+        font-weight: normal;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .choice input[type="radio"] {
+        width: auto;
+        accent-color: var(--accent);
+      }
       #recent-list {
         list-style: none;
         margin: 0.6rem 0 0;
@@ -360,9 +376,54 @@
             >
               Copy AI prompt
             </button>
+            <button class="subtle" id="settings-toggle">Settings</button>
             <button class="subtle" id="signout">Sign out</button>
           </span>
         </div>
+      </div>
+
+      <div class="card hidden" id="settings-card">
+        <label>Where entries go</label>
+        <div class="choice-row">
+          <label class="choice"
+            ><input type="radio" name="mode" value="doc" checked /> Google
+            Doc</label
+          >
+          <label class="choice"
+            ><input type="radio" name="mode" value="sheet" /> Google Sheet
+            <span class="optional"
+              >(one row per book, header frozen)</span
+            ></label
+          >
+        </div>
+
+        <label for="doc-name">File name</label>
+        <input
+          id="doc-name"
+          maxlength="128"
+          autocomplete="off"
+          placeholder="BukTrakr — Book Reviews"
+        />
+
+        <label for="doc-style" id="style-label">Doc style</label>
+        <select id="doc-style">
+          <option value="classic">Classic — heading titles, bold labels</option>
+          <option value="minimal">Minimal — compact, understated</option>
+          <option value="vintage">
+            Vintage — serif headings, small-caps labels
+          </option>
+        </select>
+
+        <div class="actions">
+          <button id="settings-save">Save settings</button>
+          <span class="hint" id="settings-message"></span>
+        </div>
+        <p class="hint" style="margin-top: 0.9rem">
+          Your choices are saved onto your Google files themselves, so they
+          follow you to any device the next time you sign in. Renames apply to
+          your existing file; switching destination starts (or resumes) a file
+          of that type — your other file is never touched.
+        </p>
       </div>
 
       <form class="card hidden" id="entry-form">
@@ -700,6 +761,25 @@
         show($("status"), state !== "signedOut");
         show($("entry-form"), state === "ready");
         show($("recent-card"), state === "ready" && allEntries.length > 0);
+        if (state !== "ready") show($("settings-card"), false);
+      }
+
+      function applySettings(settings) {
+        if (!settings) return;
+        for (const radio of document.querySelectorAll('input[name="mode"]')) {
+          radio.checked = radio.value === settings.mode;
+        }
+        $("doc-name").value = settings.docName || "";
+        $("doc-style").value = settings.style || "classic";
+        syncSettingsUi();
+      }
+
+      function syncSettingsUi() {
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        $("doc-style").disabled = mode === "sheet";
+        $("style-label").style.opacity = mode === "sheet" ? "0.5" : "";
+        $("doc-link").textContent =
+          mode === "sheet" ? "Open spreadsheet" : "Open reviews doc";
       }
 
       function fmtDate(iso) {
@@ -764,10 +844,9 @@
           return;
         }
         $("who").textContent = s.email || "Signed in";
-        if (s.docUrl) {
-          $("doc-link").href = s.docUrl;
-          show($("doc-link"), true);
-        }
+        applySettings(s.settings);
+        show($("doc-link"), Boolean(s.docUrl));
+        if (s.docUrl) $("doc-link").href = s.docUrl;
         render("ready");
         loadRecent();
       }
@@ -781,6 +860,44 @@
       $("signout").addEventListener("click", async () => {
         await fetch("/api/signout", { method: "POST" });
         render("signedOut");
+      });
+
+      $("settings-toggle").addEventListener("click", () => {
+        show(
+          $("settings-card"),
+          $("settings-card").classList.contains("hidden"),
+        );
+      });
+      for (const radio of document.querySelectorAll('input[name="mode"]')) {
+        radio.addEventListener("change", syncSettingsUi);
+      }
+      $("settings-save").addEventListener("click", async () => {
+        $("settings-message").textContent = "Saving…";
+        try {
+          const res = await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: document.querySelector('input[name="mode"]:checked').value,
+              docName: $("doc-name").value,
+              style: $("doc-style").value,
+            }),
+          });
+          if (res.status === 401) return render("signedOut");
+          if (res.status === 409) return render("reconnect");
+          if (!res.ok) {
+            $("settings-message").textContent = "Couldn't save — try again.";
+            return;
+          }
+          const body = await res.json();
+          applySettings(body.settings);
+          show($("doc-link"), Boolean(body.docUrl));
+          if (body.docUrl) $("doc-link").href = body.docUrl;
+          $("settings-message").textContent = "Saved ✓";
+          loadRecent();
+        } catch {
+          $("settings-message").textContent = "Network error — try again.";
+        }
       });
 
       $("export").addEventListener("click", async () => {

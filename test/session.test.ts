@@ -11,6 +11,10 @@ const DATA: SessionData = {
   email: "reader@example.com",
   refreshToken: "1//refresh-token",
   docId: "doc-abc",
+  sheetId: null,
+  mode: "doc",
+  docName: "BukTrakr — Book Reviews",
+  style: "classic",
 };
 
 describe("session tokens", () => {
@@ -26,6 +30,43 @@ describe("session tokens", () => {
       3600,
     );
     expect((await verifySessionToken(SECRET, token))?.docId).toBeNull();
+  });
+
+  it("round-trips sheet-mode settings", async () => {
+    const token = await createSessionToken(
+      SECRET,
+      {
+        ...DATA,
+        mode: "sheet",
+        sheetId: "sheet-1",
+        docName: "My Books",
+        style: "vintage",
+      },
+      3600,
+    );
+    expect(await verifySessionToken(SECRET, token)).toMatchObject({
+      mode: "sheet",
+      sheetId: "sheet-1",
+      docName: "My Books",
+      style: "vintage",
+    });
+  });
+
+  it("fills defaults for legacy cookies missing the settings fields", async () => {
+    const legacy = {
+      sub: DATA.sub,
+      email: DATA.email,
+      refreshToken: DATA.refreshToken,
+      docId: "old-doc",
+    } as SessionData;
+    const token = await createSessionToken(SECRET, legacy, 3600);
+    expect(await verifySessionToken(SECRET, token)).toMatchObject({
+      docId: "old-doc",
+      sheetId: null,
+      mode: "doc",
+      docName: "BukTrakr — Book Reviews",
+      style: "classic",
+    });
   });
 
   it("rejects the wrong secret", async () => {

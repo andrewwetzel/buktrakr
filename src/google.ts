@@ -85,7 +85,11 @@ export async function exchangeCode(
   env: Env,
   redirectUri: string,
   code: string,
-): Promise<{ refreshToken: string | null; claims: IdClaims | null }> {
+): Promise<{
+  accessToken: string | null;
+  refreshToken: string | null;
+  claims: IdClaims | null;
+}> {
   const { status, body } = await tokenRequest({
     code,
     client_id: clientId(env),
@@ -99,6 +103,7 @@ export async function exchangeCode(
     );
   }
   return {
+    accessToken: body.access_token ?? null,
     refreshToken: body.refresh_token ?? null,
     claims: parseIdToken(body.id_token),
   };

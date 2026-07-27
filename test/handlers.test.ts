@@ -25,7 +25,16 @@ describe("handlers (no network)", () => {
   it("GET /api/status with a valid session cookie reports signed in", async () => {
     const token = await createSessionToken(
       env.SESSION_SECRET,
-      { sub: "s", email: "e@example.com", refreshToken: "rt", docId: "d1" },
+      {
+        sub: "s",
+        email: "e@example.com",
+        refreshToken: "rt",
+        docId: "d1",
+        sheetId: null,
+        mode: "doc",
+        docName: "BukTrakr — Book Reviews",
+        style: "classic",
+      },
       3600,
     );
     const res = await call("/api/status", {
@@ -34,6 +43,7 @@ describe("handlers (no network)", () => {
     expect(await res.json()).toMatchObject({
       signedIn: true,
       email: "e@example.com",
+      settings: { mode: "doc", style: "classic" },
       docUrl: "https://docs.google.com/document/d/d1/edit",
     });
   });
