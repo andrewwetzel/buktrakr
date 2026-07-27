@@ -273,11 +273,113 @@
         background: var(--accent);
         color: var(--accent-ink);
       }
-      button.subtle {
+      .pill-row {
+        display: inline-flex;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .pill {
+        display: inline-block;
+        font: inherit;
+        font-size: 0.85rem;
+        padding: 0.35rem 0.8rem;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--card);
+        color: var(--ink);
+        text-decoration: none;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .pill:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--card);
+      }
+      .pill.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-ink);
+      }
+      .pill.primary:hover {
+        opacity: 0.9;
+        color: var(--accent-ink);
+      }
+      .style-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+        gap: 0.6rem;
+      }
+      .style-grid.disabled {
+        opacity: 0.45;
+        pointer-events: none;
+      }
+      .style-card {
         background: none;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.55rem;
+        text-align: left;
+        color: var(--ink);
+        display: block;
+      }
+      .style-card[aria-checked="true"] {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1.5px var(--accent);
+      }
+      .style-name {
+        display: block;
+        font-size: 0.75rem;
+        font-weight: bold;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
         color: var(--muted);
-        text-decoration: underline;
-        padding: 0.25rem;
+        margin-bottom: 0.4rem;
+      }
+      /* Previews imitate a real Google Doc: white page, Docs' default Arial
+         metrics, and each template's actual title/meta/label treatment. */
+      .prev {
+        display: block;
+        background: #ffffff;
+        color: #202124;
+        border: 1px solid #dcd9d3;
+        border-radius: 4px;
+        padding: 0.55rem 0.6rem;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 0.7rem;
+        line-height: 1.4;
+      }
+      .prev span {
+        display: block;
+      }
+      .prev .p-meta {
+        font-style: italic;
+      }
+      .prev .p-label {
+        font-weight: bold;
+        margin-top: 0.25rem;
+      }
+      .prev-classic .p-title {
+        font-size: 0.95rem;
+        margin-bottom: 0.1rem;
+      }
+      .prev-minimal .p-title {
+        font-weight: bold;
+        font-size: 0.78rem;
+      }
+      .prev-minimal .p-meta {
+        color: #73716d;
+      }
+      .prev-vintage .p-title {
+        font-family: "Playfair Display", Georgia, "Times New Roman", serif;
+        font-size: 0.95rem;
+        color: #3b6e4f;
+        margin-bottom: 0.1rem;
+      }
+      .prev-vintage .p-label {
+        font-variant: small-caps;
+        text-transform: lowercase;
       }
       .actions {
         margin-top: 1.2rem;
@@ -365,19 +467,23 @@
       <div class="card hidden" id="status">
         <div class="row">
           <span class="who" id="who"></span>
-          <span>
-            <a id="doc-link" target="_blank" rel="noopener" class="hidden"
+          <span class="pill-row">
+            <a
+              id="doc-link"
+              target="_blank"
+              rel="noopener"
+              class="pill primary hidden"
               >Open reviews doc</a
             >
             <button
-              class="subtle"
+              class="pill"
               id="export"
               title="Copy your reading log as a prompt for any AI chat"
             >
               Copy AI prompt
             </button>
-            <button class="subtle" id="settings-toggle">Settings</button>
-            <button class="subtle" id="signout">Sign out</button>
+            <button class="pill" id="settings-toggle">Settings</button>
+            <button class="pill" id="signout">Sign out</button>
           </span>
         </div>
       </div>
@@ -405,14 +511,59 @@
           placeholder="BukTrakr — Book Reviews"
         />
 
-        <label for="doc-style" id="style-label">Doc style</label>
-        <select id="doc-style">
-          <option value="classic">Classic — heading titles, bold labels</option>
-          <option value="minimal">Minimal — compact, understated</option>
-          <option value="vintage">
-            Vintage — serif headings, small-caps labels
-          </option>
-        </select>
+        <label id="style-label">Doc style</label>
+        <div
+          class="style-grid"
+          id="style-grid"
+          role="radiogroup"
+          aria-labelledby="style-label"
+        >
+          <button
+            type="button"
+            class="style-card"
+            data-style="classic"
+            role="radio"
+            aria-checked="true"
+          >
+            <span class="style-name">Classic</span>
+            <span class="prev prev-classic">
+              <span class="p-title">Dune — Frank Herbert</span>
+              <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
+              <span class="p-label">The Good</span>
+              <span class="p-body">Sweeping, strange, unforgettable.</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            class="style-card"
+            data-style="minimal"
+            role="radio"
+            aria-checked="false"
+          >
+            <span class="style-name">Minimal</span>
+            <span class="prev prev-minimal">
+              <span class="p-title">Dune — Frank Herbert</span>
+              <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
+              <span class="p-label">The Good</span>
+              <span class="p-body">Sweeping, strange, unforgettable.</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            class="style-card"
+            data-style="vintage"
+            role="radio"
+            aria-checked="false"
+          >
+            <span class="style-name">Vintage</span>
+            <span class="prev prev-vintage">
+              <span class="p-title">Dune — Frank Herbert</span>
+              <span class="p-meta">Rating: 9/10 · 2026-07-01</span>
+              <span class="p-label">The Good</span>
+              <span class="p-body">Sweeping, strange, unforgettable.</span>
+            </span>
+          </button>
+        </div>
 
         <div class="actions">
           <button id="settings-save">Save settings</button>
@@ -764,19 +915,36 @@
         if (state !== "ready") show($("settings-card"), false);
       }
 
+      let selectedStyle = "classic";
+
+      function setStyleChoice(style) {
+        selectedStyle = style;
+        for (const card of document.querySelectorAll(".style-card")) {
+          card.setAttribute(
+            "aria-checked",
+            String(card.dataset.style === style),
+          );
+        }
+      }
+      for (const card of document.querySelectorAll(".style-card")) {
+        card.addEventListener("click", () =>
+          setStyleChoice(card.dataset.style),
+        );
+      }
+
       function applySettings(settings) {
         if (!settings) return;
         for (const radio of document.querySelectorAll('input[name="mode"]')) {
           radio.checked = radio.value === settings.mode;
         }
         $("doc-name").value = settings.docName || "";
-        $("doc-style").value = settings.style || "classic";
+        setStyleChoice(settings.style || "classic");
         syncSettingsUi();
       }
 
       function syncSettingsUi() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
-        $("doc-style").disabled = mode === "sheet";
+        $("style-grid").classList.toggle("disabled", mode === "sheet");
         $("style-label").style.opacity = mode === "sheet" ? "0.5" : "";
         $("doc-link").textContent =
           mode === "sheet" ? "Open spreadsheet" : "Open reviews doc";
@@ -880,7 +1048,7 @@
             body: JSON.stringify({
               mode: document.querySelector('input[name="mode"]:checked').value,
               docName: $("doc-name").value,
-              style: $("doc-style").value,
+              style: selectedStyle,
             }),
           });
           if (res.status === 401) return render("signedOut");
