@@ -37,6 +37,7 @@ import {
 import {
   appendRow,
   appendRows,
+  applySheetStyle,
   createSheet,
   readRows,
   rowsToText,
@@ -429,7 +430,7 @@ export default {
           const mime = sheetMode ? SHEET_MIME : DOC_MIME;
           const create = async (): Promise<string> => {
             const id = sheetMode
-              ? await createSheet(accessToken, session.docName)
+              ? await createSheet(accessToken, session.docName, session.style)
               : await createDoc(accessToken, session.docName);
             // Record the active flag + style so other devices adopt this
             // file at sign-in. Best-effort.
@@ -513,10 +514,12 @@ export default {
           let fileId =
             (toSheet ? updated.sheetId : updated.docId) ??
             (await findFile(accessToken, mime));
+          let createdNow = false;
           if (!fileId && source.length > 0) {
             fileId = toSheet
-              ? await createSheet(accessToken, prefs.docName)
+              ? await createSheet(accessToken, prefs.docName, prefs.style)
               : await createDoc(accessToken, prefs.docName);
+            createdNow = true;
           }
           if (fileId) {
             try {
@@ -576,6 +579,17 @@ export default {
               (styleChanged || modeSwitched)
             ) {
               restyled = await restyleDoc(accessToken, fileId, prefs.style);
+            }
+            // Sheet themes are whole-sheet chrome (header, banding, widths,
+            // wrapping) — a saved-but-unapplied theme would mean nothing, so
+            // apply on any theme/mode change. Sheets has version history too.
+            if (
+              fileId &&
+              toSheet &&
+              !createdNow &&
+              (styleChanged || modeSwitched)
+            ) {
+              await applySheetStyle(accessToken, fileId, prefs.style);
             }
           } catch (err) {
             console.error("retroactive settings step failed:", err);

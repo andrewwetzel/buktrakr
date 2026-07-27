@@ -85,11 +85,14 @@ That's the whole setup. Visit the app, sign in with Google, log a book.
   last five entries with quick stats, and warns (without blocking) when a
   title you're entering matches something you already logged.
 - **Customizable destination (Settings)**: each user can rename their
-  reviews file, pick one of eight doc styling templates (Classic, Minimal,
-  Vintage, Ocean, Sunset, Royal, Typewriter, Rose — shown as live previews,
-  applied to new entries), or switch the destination to a **Google Sheet**
-  (one row per book with a frozen, bold header row; review text is written
-  as literal values so it can never be interpreted as formulas). Settings
+  reviews file, pick one of eight themes (Classic, Minimal, Vintage, Ocean,
+  Sunset, Royal, Typewriter, Rose — shown as live previews), or switch the
+  destination to a **Google Sheet**. In doc mode themes style each entry;
+  in sheet mode they paint the header row and alternating row banding, with
+  sized columns and wrapped, top-aligned cells (review text is written as
+  literal values so it can never be interpreted as formulas). An opt-in
+  checkbox retroactively restyles existing doc entries or copies entries
+  across when switching destination. Settings
   sync across devices with no server storage: they're written to the user's
   own Drive files as app-private `appProperties` (active-destination flag +
   style; the file's name is the display name) and read back at each sign-in.

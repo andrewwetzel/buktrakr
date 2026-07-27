@@ -2,7 +2,12 @@
 // entry, header row frozen. Works under drive.file for spreadsheets the app
 // creates. Requires the Google Sheets API to be enabled in the GCP project.
 
-import { DocNotFoundError, type Entry, type ParsedEntry } from "./docs";
+import {
+  DocNotFoundError,
+  type Entry,
+  type ParsedEntry,
+  type StyleId,
+} from "./docs";
 
 export const SHEET_MIME = "application/vnd.google-apps.spreadsheet";
 const HEADER = [
@@ -15,6 +20,170 @@ const HEADER = [
   "The Bad",
   "The Other",
 ];
+// Pixel widths per column: dates/ratings stay narrow, review text gets room
+// (cells wrap, so long reviews grow rows instead of overflowing).
+const COLUMN_WIDTHS = [95, 220, 150, 65, 120, 280, 280, 280];
+
+interface SheetColor {
+  red: number;
+  green: number;
+  blue: number;
+}
+const hex = (h: string): SheetColor => {
+  const n = parseInt(h.slice(1), 16);
+  return {
+    red: ((n >> 16) & 255) / 255,
+    green: ((n >> 8) & 255) / 255,
+    blue: (n & 255) / 255,
+  };
+};
+const WHITE = hex("#FFFFFF");
+
+interface SheetTheme {
+  header: SheetColor;
+  headerText: SheetColor;
+  band: SheetColor;
+  fontFamily?: string;
+}
+
+// One theme per StyleId — same palette family as the doc templates.
+const SHEET_THEMES: Record<StyleId, SheetTheme> = {
+  classic: { header: hex("#3B6E4F"), headerText: WHITE, band: hex("#F1EFE8") },
+  minimal: {
+    header: hex("#F2F2F2"),
+    headerText: hex("#202124"),
+    band: hex("#FAFAFA"),
+  },
+  vintage: { header: hex("#3B6E4F"), headerText: WHITE, band: hex("#EDF2ED") },
+  ocean: { header: hex("#1B4F72"), headerText: WHITE, band: hex("#EAF1F7") },
+  sunset: { header: hex("#A04000"), headerText: WHITE, band: hex("#FBF0E6") },
+  royal: { header: hex("#5B2C6F"), headerText: WHITE, band: hex("#F3EDF7") },
+  typewriter: {
+    header: hex("#333333"),
+    headerText: WHITE,
+    band: hex("#F5F5F5"),
+    fontFamily: "Courier New",
+  },
+  rose: { header: hex("#B03A5B"), headerText: WHITE, band: hex("#FAEDF1") },
+};
+
+/**
+ * Applies a theme to the whole sheet: colored bold header, alternating row
+ * banding, per-column widths, and wrapped top-aligned cells. Idempotent —
+ * existing banding is replaced, not stacked.
+ */
+export async function applySheetStyle(
+  accessToken: string,
+  sheetId: string,
+  style: StyleId,
+): Promise<void> {
+  const theme = SHEET_THEMES[style] ?? SHEET_THEMES.classic;
+  const metaRes = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets(properties(sheetId,gridProperties(rowCount)),bandedRanges(bandedRangeId))`,
+    { headers: authHeaders(accessToken) },
+  );
+  if (metaRes.status === 404) throw new DocNotFoundError();
+  if (!metaRes.ok) throw new Error(`Sheet meta failed: ${metaRes.status}`);
+  const meta = (await metaRes.json()) as {
+    sheets?: {
+      properties?: { sheetId?: number; gridProperties?: { rowCount?: number } };
+      bandedRanges?: { bandedRangeId?: number }[];
+    }[];
+  };
+  const first = meta.sheets?.[0];
+  const gridId = first?.properties?.sheetId ?? 0;
+  const rowCount = first?.properties?.gridProperties?.rowCount ?? 1000;
+  const bandIds = (meta.sheets ?? [])
+    .flatMap((s) => (s.bandedRanges ?? []).map((b) => b.bandedRangeId))
+    .filter((id): id is number => typeof id === "number");
+
+  const grid = {
+    sheetId: gridId,
+    startRowIndex: 0,
+    endRowIndex: rowCount,
+    startColumnIndex: 0,
+    endColumnIndex: HEADER.length,
+  };
+  const requests: unknown[] = [
+    ...bandIds.map((id) => ({ deleteBanding: { bandedRangeId: id } })),
+    {
+      updateSheetProperties: {
+        properties: { sheetId: gridId, gridProperties: { frozenRowCount: 1 } },
+        fields: "gridProperties.frozenRowCount",
+      },
+    },
+    {
+      repeatCell: {
+        range: grid,
+        cell: {
+          userEnteredFormat: {
+            wrapStrategy: "WRAP",
+            verticalAlignment: "TOP",
+            ...(theme.fontFamily
+              ? { textFormat: { fontFamily: theme.fontFamily } }
+              : {}),
+          },
+        },
+        fields: theme.fontFamily
+          ? "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat.fontFamily)"
+          : "userEnteredFormat(wrapStrategy,verticalAlignment)",
+      },
+    },
+    {
+      repeatCell: {
+        range: { ...grid, endRowIndex: 1 },
+        cell: {
+          userEnteredFormat: {
+            textFormat: {
+              bold: true,
+              foregroundColor: theme.headerText,
+              ...(theme.fontFamily ? { fontFamily: theme.fontFamily } : {}),
+            },
+          },
+        },
+        fields:
+          "userEnteredFormat.textFormat(bold,foregroundColor" +
+          (theme.fontFamily ? ",fontFamily)" : ")"),
+      },
+    },
+    {
+      addBanding: {
+        bandedRange: {
+          range: grid,
+          rowProperties: {
+            headerColor: theme.header,
+            firstBandColor: WHITE,
+            secondBandColor: theme.band,
+          },
+        },
+      },
+    },
+    ...COLUMN_WIDTHS.map((pixelSize, i) => ({
+      updateDimensionProperties: {
+        range: {
+          sheetId: gridId,
+          dimension: "COLUMNS",
+          startIndex: i,
+          endIndex: i + 1,
+        },
+        properties: { pixelSize },
+        fields: "pixelSize",
+      },
+    })),
+  ];
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`,
+    {
+      method: "POST",
+      headers: authHeaders(accessToken),
+      body: JSON.stringify({ requests }),
+    },
+  );
+  if (res.status === 404) throw new DocNotFoundError();
+  if (!res.ok)
+    throw new Error(`Sheet style failed: ${res.status} ${await res.text()}`);
+}
 
 function authHeaders(accessToken: string): Record<string, string> {
   return {
@@ -30,6 +199,7 @@ export function sheetUrl(sheetId: string): string {
 export async function createSheet(
   accessToken: string,
   name: string,
+  style: StyleId = "classic",
 ): Promise<string> {
   const res = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
     method: "POST",
@@ -48,14 +218,11 @@ export async function createSheet(
   });
   if (!res.ok)
     throw new Error(`Sheet creation failed: ${res.status} ${await res.text()}`);
-  const body = (await res.json()) as {
-    spreadsheetId?: string;
-    sheets?: { properties?: { sheetId?: number } }[];
-  };
+  const body = (await res.json()) as { spreadsheetId?: string };
   if (!body.spreadsheetId) throw new Error("Sheet creation returned no id");
 
-  // Header row + bold formatting; ranges without a tab name hit the first
-  // sheet, so a later tab rename doesn't break appends.
+  // Header row values; ranges without a tab name hit the first sheet, so a
+  // later tab rename doesn't break appends.
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${body.spreadsheetId}/values/A1:H1?valueInputOption=RAW`,
     {
@@ -64,25 +231,7 @@ export async function createSheet(
       body: JSON.stringify({ values: [HEADER] }),
     },
   );
-  const gridId = body.sheets?.[0]?.properties?.sheetId ?? 0;
-  await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${body.spreadsheetId}:batchUpdate`,
-    {
-      method: "POST",
-      headers: authHeaders(accessToken),
-      body: JSON.stringify({
-        requests: [
-          {
-            repeatCell: {
-              range: { sheetId: gridId, startRowIndex: 0, endRowIndex: 1 },
-              cell: { userEnteredFormat: { textFormat: { bold: true } } },
-              fields: "userEnteredFormat.textFormat.bold",
-            },
-          },
-        ],
-      }),
-    },
-  );
+  await applySheetStyle(accessToken, body.spreadsheetId, style);
   return body.spreadsheetId;
 }
 

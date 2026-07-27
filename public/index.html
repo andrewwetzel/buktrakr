@@ -687,7 +687,11 @@
               placeholder="BukTrakr — Book Reviews"
             />
 
-            <label id="style-label">Doc style</label>
+            <label id="style-label">Theme</label>
+            <p class="hint hidden" id="style-hint" style="margin: 0 0 0.4rem">
+              In Sheet mode the theme colors the header row and row banding —
+              applied when you save.
+            </p>
             <div
               class="style-grid collapsed"
               id="style-grid"
@@ -1058,8 +1062,7 @@
 
       function syncSettingsUi() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
-        $("style-grid").classList.toggle("disabled", mode === "sheet");
-        $("style-label").style.opacity = mode === "sheet" ? "0.5" : "";
+        show($("style-hint"), mode === "sheet");
         $("doc-link").textContent =
           mode === "sheet" ? "Open spreadsheet" : "Open reviews doc";
         // The opt-in retroactive checkbox: copying on a mode switch, or
