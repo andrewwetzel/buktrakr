@@ -1116,32 +1116,48 @@
       }
 
       // -- Series: Wikidata entity search, filtered to series-like items --
+      const SERIESY =
+        /\b(series|trilogy|saga|sequence|novels|tetralogy|pentalogy|hexalogy|heptalogy|franchise)\b/i;
+
       async function searchSeries(q, signal) {
-        const params = new URLSearchParams({
-          action: "wbsearchentities",
-          search: q,
-          language: "en",
-          uselang: "en",
-          type: "item",
-          limit: "10",
-          format: "json",
-          origin: "*",
-        });
-        const res = await fetch(
-          `https://www.wikidata.org/w/api.php?${params}`,
-          { signal },
-        );
-        if (!res.ok) throw new Error(String(res.status));
-        const data = await res.json();
-        return (data.search || [])
+        const fetchWd = async (search) => {
+          const params = new URLSearchParams({
+            action: "wbsearchentities",
+            search,
+            language: "en",
+            uselang: "en",
+            type: "item",
+            limit: "20",
+            format: "json",
+            origin: "*",
+          });
+          const res = await fetch(
+            `https://www.wikidata.org/w/api.php?${params}`,
+            { signal },
+          );
+          if (!res.ok) throw new Error(String(res.status));
+          return (await res.json()).search || [];
+        };
+        // Prefix search is narrow, so cast two nets: the raw query, and the
+        // query with "series" appended (surfaces items the raw prefix
+        // misses). Merge and dedupe by entity id.
+        const [a, b] = await Promise.all([
+          fetchWd(q),
+          fetchWd(`${q} series`).catch(() => []),
+        ]);
+        const seen = new Set();
+        const merged = [];
+        for (const s of [...a, ...b]) {
+          if (!s.label || seen.has(s.id)) continue;
+          seen.add(s.id);
+          merged.push(s);
+        }
+        return merged
           .filter(
             (s) =>
-              s.label &&
-              /\b(series|trilogy|saga|sequence|novels)\b/i.test(
-                s.description || "",
-              ),
+              SERIESY.test(s.description || "") || /\bseries\b/i.test(s.label),
           )
-          .slice(0, 6)
+          .slice(0, 8)
           .map((s) => ({
             primary: s.label,
             meta: s.description || "",
