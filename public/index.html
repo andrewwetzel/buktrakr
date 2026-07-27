@@ -263,7 +263,8 @@
         align-items: center;
         gap: 0.4rem;
       }
-      .choice input[type="radio"] {
+      .choice input[type="radio"],
+      .choice input[type="checkbox"] {
         width: auto;
         accent-color: var(--accent);
       }
@@ -697,15 +698,27 @@
               Show all styles
             </button>
 
+            <label
+              class="choice"
+              id="apply-existing-row"
+              style="margin-top: 0.9rem"
+            >
+              <input type="checkbox" id="apply-existing" />
+              <span id="apply-existing-label"
+                >Also apply the new style to my existing entries</span
+              >
+            </label>
+
             <div class="actions">
               <button id="settings-save">Save settings</button>
               <span class="hint" id="settings-message"></span>
             </div>
             <p class="hint" style="margin-top: 0.9rem">
               Your choices are saved onto your Google files themselves, so they
-              follow you to any device the next time you sign in. Renames apply
-              to your existing file; switching destination starts (or resumes) a
-              file of that type — your other file is never touched.
+              follow you to any device the next time you sign in. Applying to
+              existing entries only changes formatting or copies entries across
+              — nothing is ever deleted, and a doc restyle can be undone via
+              File → Version history in Google Docs.
             </p>
           </div>
 
@@ -1030,8 +1043,11 @@
         }
       }
 
+      let savedMode = "doc";
+
       function applySettings(settings) {
         if (!settings) return;
+        savedMode = settings.mode || "doc";
         for (const radio of document.querySelectorAll('input[name="mode"]')) {
           radio.checked = radio.value === settings.mode;
         }
@@ -1046,6 +1062,14 @@
         $("style-label").style.opacity = mode === "sheet" ? "0.5" : "";
         $("doc-link").textContent =
           mode === "sheet" ? "Open spreadsheet" : "Open reviews doc";
+        // The opt-in retroactive checkbox: copying on a mode switch, or
+        // restyling when staying in doc mode. Nothing retroactive applies
+        // when staying in sheet mode.
+        const modeChanged = mode !== savedMode;
+        show($("apply-existing-row"), modeChanged || mode === "doc");
+        $("apply-existing-label").textContent = modeChanged
+          ? "Also copy my existing entries to the new destination"
+          : "Also apply the new style to my existing entries";
       }
 
       function fmtDate(iso) {
@@ -1151,6 +1175,7 @@
               mode: document.querySelector('input[name="mode"]:checked').value,
               docName: $("doc-name").value,
               style: selectedStyle,
+              applyToExisting: $("apply-existing").checked,
             }),
           });
           if (res.status === 401) return render("signedOut");
@@ -1163,7 +1188,18 @@
           applySettings(body.settings);
           show($("doc-link"), Boolean(body.docUrl));
           if (body.docUrl) $("doc-link").href = body.docUrl;
-          $("settings-message").textContent = "Saved ✓";
+          $("apply-existing").checked = false;
+          let msg = "Saved ✓";
+          if (body.migrated) {
+            msg += ` · copied ${body.migrated} ${body.migrated === 1 ? "entry" : "entries"}`;
+          }
+          if (body.restyled) {
+            msg += ` · restyled ${body.restyled} ${body.restyled === 1 ? "entry" : "entries"}`;
+          }
+          if (body.retroFailed) {
+            msg = "Saved, but updating existing entries failed — try again.";
+          }
+          $("settings-message").textContent = msg;
           loadRecent();
         } catch {
           $("settings-message").textContent = "Network error — try again.";

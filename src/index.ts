@@ -11,14 +11,17 @@ import {
   type SessionData,
 } from "./session";
 import {
+  appendEntriesBulk,
   appendEntry,
   createDoc,
   docUrl,
   findFile,
   getDocText,
   parseEntries,
+  parseEntriesFull,
   listAppFiles,
   renameFile,
+  restyleDoc,
   setFileProps,
   DocNotFoundError,
   DOC_MIME,
@@ -27,11 +30,13 @@ import {
   PROP_STYLE,
   STYLE_IDS,
   type Entry,
+  type FullEntry,
   type ParsedEntry,
   type StyleId,
 } from "./docs";
 import {
   appendRow,
+  appendRows,
   createSheet,
   readRows,
   rowsToText,
@@ -156,6 +161,8 @@ export interface Settings {
   mode: DestMode;
   docName: string;
   style: StyleId;
+  /** Opt-in: retroactively restyle / migrate existing entries. */
+  applyToExisting: boolean;
 }
 
 /**
@@ -208,8 +215,16 @@ export function validateSettings(body: unknown): Settings | null {
   if (!STYLE_IDS.includes(b.style as StyleId)) return null;
   if (typeof b.docName !== "string" || b.docName.length > 128) return null;
   const docName = b.docName.replace(/\s+/g, " ").trim() || DOC_TITLE;
-  return { mode: b.mode, docName, style: b.style as StyleId };
+  return {
+    mode: b.mode,
+    docName,
+    style: b.style as StyleId,
+    applyToExisting: b.applyToExisting === true,
+  };
 }
+
+const entryKey = (e: { title: string; date: string }): string =>
+  `${e.title.toLowerCase().trim()}|${e.date}`;
 
 export function validateEntry(body: unknown): Entry | null {
   if (typeof body !== "object" || body === null) return null;
@@ -459,39 +474,135 @@ export default {
           );
           if (!settings) return json({ error: "invalid_settings" }, 400);
 
-          const updated: SessionData = { ...session, ...settings };
+          const { applyToExisting, ...prefs } = settings;
+          const updated: SessionData = { ...session, ...prefs };
+          const toSheet = prefs.mode === "sheet";
+          const modeSwitched = session.mode !== prefs.mode;
+          const styleChanged = session.style !== prefs.style;
+
+          // Migration source: the OLD mode's entries (read-only, opt-in).
+          let source: FullEntry[] = [];
+          if (applyToExisting && modeSwitched) {
+            try {
+              if (session.mode === "doc") {
+                const srcId =
+                  session.docId ?? (await findFile(accessToken, DOC_MIME));
+                if (srcId) {
+                  source = parseEntriesFull(
+                    await getDocText(accessToken, srcId),
+                  );
+                  updated.docId = srcId;
+                }
+              } else {
+                const srcId =
+                  session.sheetId ?? (await findFile(accessToken, SHEET_MIME));
+                if (srcId) {
+                  source = await readRows(accessToken, srcId);
+                  updated.sheetId = srcId;
+                }
+              }
+            } catch (err) {
+              if (!(err instanceof DocNotFoundError)) throw err;
+            }
+          }
+
           // Apply the name + active flag + style to the destination file if
-          // it already exists (rediscover it if this cookie doesn't know it).
-          const mime = settings.mode === "sheet" ? SHEET_MIME : DOC_MIME;
-          const known =
-            settings.mode === "sheet" ? updated.sheetId : updated.docId;
-          const fileId = known ?? (await findFile(accessToken, mime));
+          // it exists (rediscover it if this cookie doesn't know it); create
+          // it right away when a migration needs somewhere to land.
+          const mime = toSheet ? SHEET_MIME : DOC_MIME;
+          let fileId =
+            (toSheet ? updated.sheetId : updated.docId) ??
+            (await findFile(accessToken, mime));
+          if (!fileId && source.length > 0) {
+            fileId = toSheet
+              ? await createSheet(accessToken, prefs.docName)
+              : await createDoc(accessToken, prefs.docName);
+          }
           if (fileId) {
             try {
-              await renameFile(accessToken, fileId, settings.docName);
-              await markActive(accessToken, fileId, settings.style);
-              if (settings.mode === "sheet") updated.sheetId = fileId;
+              await renameFile(accessToken, fileId, prefs.docName);
+              await markActive(accessToken, fileId, prefs.style);
+              if (toSheet) updated.sheetId = fileId;
               else updated.docId = fileId;
             } catch (err) {
               if (!(err instanceof DocNotFoundError)) throw err;
               // Stale id — forget it; the next submission recreates the file.
-              if (settings.mode === "sheet") updated.sheetId = null;
+              if (toSheet) updated.sheetId = null;
               else updated.docId = null;
+              fileId = null;
             }
           }
+
+          // Retroactive work (opt-in): copy entries across on a mode switch,
+          // restyle existing doc entries on a style change. Append/format
+          // only — never deletes or edits text. Best-effort: a failure here
+          // must not lose the settings save itself.
+          let migrated = 0;
+          let restyled = 0;
+          let retroFailed = false;
+          try {
+            if (fileId && source.length > 0) {
+              if (toSheet) {
+                const existing = new Set(
+                  (await readRows(accessToken, fileId)).map(entryKey),
+                );
+                const missing = source.filter(
+                  (e) => !existing.has(entryKey(e)),
+                );
+                await appendRows(accessToken, fileId, missing);
+                migrated = missing.length;
+              } else {
+                const existing = new Set(
+                  parseEntries(await getDocText(accessToken, fileId)).map(
+                    entryKey,
+                  ),
+                );
+                const missing = source.filter(
+                  (e) => !existing.has(entryKey(e)),
+                );
+                await appendEntriesBulk(
+                  accessToken,
+                  fileId,
+                  missing.map((e) => ({ ...e, coverUrl: "" })),
+                  prefs.style,
+                );
+                migrated = missing.length;
+              }
+            }
+            if (
+              fileId &&
+              !toSheet &&
+              applyToExisting &&
+              (styleChanged || modeSwitched)
+            ) {
+              restyled = await restyleDoc(accessToken, fileId, prefs.style);
+            }
+          } catch (err) {
+            console.error("retroactive settings step failed:", err);
+            retroFailed = true;
+          }
+
           // The other-mode file, if any, loses the active flag so sign-ins
           // elsewhere adopt the right destination. Best-effort.
-          const otherId =
-            settings.mode === "sheet" ? updated.docId : updated.sheetId;
+          const otherId = toSheet ? updated.docId : updated.sheetId;
           if (otherId) {
             await setFileProps(accessToken, otherId, {
               [PROP_ACTIVE]: null,
             }).catch(() => {});
           }
 
-          return json({ ok: true, settings, docUrl: destUrl(updated) }, 200, [
-            await sessionCookie(env, updated),
-          ]);
+          return json(
+            {
+              ok: true,
+              settings: prefs,
+              migrated,
+              restyled,
+              retroFailed,
+              docUrl: destUrl(updated),
+            },
+            200,
+            [await sessionCookie(env, updated)],
+          );
         }
 
         case "GET /api/recent": {

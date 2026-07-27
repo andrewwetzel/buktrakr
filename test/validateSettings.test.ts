@@ -5,7 +5,12 @@ describe("validateSettings", () => {
   it("accepts valid doc and sheet settings", () => {
     expect(
       validateSettings({ mode: "doc", docName: "My Books", style: "vintage" }),
-    ).toEqual({ mode: "doc", docName: "My Books", style: "vintage" });
+    ).toEqual({
+      mode: "doc",
+      docName: "My Books",
+      style: "vintage",
+      applyToExisting: false,
+    });
     expect(
       validateSettings({ mode: "sheet", docName: "Log", style: "classic" }),
     ).toMatchObject({ mode: "sheet" });
@@ -14,6 +19,17 @@ describe("validateSettings", () => {
         validateSettings({ mode: "doc", docName: "x", style }),
       ).toMatchObject({ style });
     }
+  });
+
+  it("defaults applyToExisting to false and accepts true", () => {
+    const base = { mode: "doc", docName: "x", style: "classic" };
+    expect(validateSettings(base)!.applyToExisting).toBe(false);
+    expect(
+      validateSettings({ ...base, applyToExisting: true })!.applyToExisting,
+    ).toBe(true);
+    expect(
+      validateSettings({ ...base, applyToExisting: "yes" })!.applyToExisting,
+    ).toBe(false);
   });
 
   it("defaults a blank name and collapses whitespace", () => {

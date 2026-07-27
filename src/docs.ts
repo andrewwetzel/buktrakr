@@ -351,17 +351,15 @@ function styleRequests(
   return requests;
 }
 
-/** One append attempt; returns false on a revision/index conflict (retryable). */
-async function tryAppendAt(
-  accessToken: string,
-  docId: string,
+/** Builds one entry's text block + style requests at a given insert index. */
+function buildEntryBlock(
   entry: Entry,
   insertAt: number,
-  revisionId: string,
   style: StyleId,
-): Promise<boolean> {
+  includeCover: boolean,
+): { text: string; styleReqs: unknown[]; coverIndex: number | null } {
   const body = (s: string): string => neutralizeMetaLookalikes(clean(s)) || "—";
-  const hasCover = Boolean(entry.coverUrl);
+  const hasCover = includeCover && Boolean(entry.coverUrl);
   const parts: {
     text: string;
     kind: "title" | "cover" | "meta" | "label" | "body";
@@ -396,9 +394,28 @@ async function tryAppendAt(
   const labelRs = ranges.filter((r) => r.kind === "label");
   const blockEnd = insertAt + text.length;
 
+  return {
+    text,
+    styleReqs: styleRequests(style, titleR, metaR, labelRs, blockEnd),
+    coverIndex: coverR?.start ?? null,
+  };
+}
+
+/** One append attempt; returns false on a revision/index conflict (retryable). */
+async function tryAppendAt(
+  accessToken: string,
+  docId: string,
+  entry: Entry,
+  insertAt: number,
+  revisionId: string,
+  style: StyleId,
+): Promise<boolean> {
+  const block = buildEntryBlock(entry, insertAt, style, true);
+  const coverR = block.coverIndex !== null ? { start: block.coverIndex } : null;
+
   const requests = [
-    { insertText: { location: { index: insertAt }, text } },
-    ...styleRequests(style, titleR, metaR, labelRs, blockEnd),
+    { insertText: { location: { index: insertAt }, text: block.text } },
+    ...block.styleReqs,
   ];
 
   const res = await fetch(
@@ -447,6 +464,62 @@ async function tryAppendAt(
   return true;
 }
 
+/**
+ * Appends many entries in chunks (one insertText + styles per chunk). Used
+ * for sheet→doc migration; cover images are not part of bulk appends.
+ */
+export async function appendEntriesBulk(
+  accessToken: string,
+  docId: string,
+  entries: Entry[],
+  style: StyleId,
+): Promise<void> {
+  const CHUNK = 50;
+  for (let i = 0; i < entries.length; i += CHUNK) {
+    const chunk = entries.slice(i, i + CHUNK);
+    const { endIndex } = await getEndState(accessToken, docId);
+    const insertAt = endIndex - 1;
+    let text = "";
+    const styleReqs: unknown[] = [];
+    for (const entry of chunk) {
+      const block = buildEntryBlock(
+        entry,
+        insertAt + text.length,
+        style,
+        false,
+      );
+      text += block.text;
+      styleReqs.push(...block.styleReqs);
+    }
+    const res = await fetch(
+      `https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`,
+      {
+        method: "POST",
+        headers: authHeaders(accessToken),
+        body: JSON.stringify({
+          requests: [
+            { insertText: { location: { index: insertAt }, text } },
+            ...styleReqs,
+          ],
+        }),
+      },
+    );
+    if (res.status === 404) throw new DocNotFoundError();
+    if (!res.ok) {
+      throw new Error(`Bulk append failed: ${res.status} ${await res.text()}`);
+    }
+  }
+}
+
+// Section labels the parser and restyler recognize (current + legacy).
+const LABEL_TO_FIELD: Record<string, "liked" | "disliked" | "notes"> = {
+  "The Good": "liked",
+  "What I liked": "liked",
+  "The Bad": "disliked",
+  "What I didn't like": "disliked",
+  "The Other": "notes",
+};
+
 export interface ParsedEntry {
   title: string;
   author: string;
@@ -478,6 +551,190 @@ export function parseEntries(text: string): ParsedEntry[] {
     });
   }
   return entries;
+}
+
+export interface FullEntry extends ParsedEntry {
+  isbn: string;
+  liked: string;
+  disliked: string;
+  notes: string;
+}
+
+/**
+ * Like parseEntries, but also recovers ISBN and the section bodies — used
+ * when migrating a doc's entries into the spreadsheet destination.
+ */
+export function parseEntriesFull(text: string): FullEntry[] {
+  const lines = text.split("\n");
+  const anchors: { titleIdx: number; metaIdx: number }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!META_LINE_RE.test(lines[i])) continue;
+    let j = i - 1;
+    while (j >= 0 && !lines[j].trim()) j--;
+    if (j >= 0) anchors.push({ titleIdx: j, metaIdx: i });
+  }
+
+  const cleanBody = (parts: string[]): string => {
+    const joined = parts
+      .join("\n")
+      .replace(/\u200B/g, "")
+      .trim();
+    return joined === "—" ? "" : joined;
+  };
+
+  return anchors.map((a, n) => {
+    const titleLine = lines[a.titleIdx].trim();
+    const sep = titleLine.lastIndexOf(" — ");
+    const meta = lines[a.metaIdx];
+    const m = meta.match(META_LINE_RE)!;
+    const isbn = meta.match(/· ISBN ([0-9Xx-]+)/)?.[1] ?? "";
+
+    const regionEnd = anchors[n + 1]?.titleIdx ?? lines.length;
+    const buffers = { liked: [], disliked: [], notes: [] } as Record<
+      "liked" | "disliked" | "notes",
+      string[]
+    >;
+    let current: "liked" | "disliked" | "notes" | null = null;
+    for (let i = a.metaIdx + 1; i < regionEnd; i++) {
+      const field = LABEL_TO_FIELD[lines[i].trim()];
+      if (field) {
+        current = field;
+        continue;
+      }
+      if (current) buffers[current].push(lines[i]);
+    }
+
+    return {
+      title: sep > 0 ? titleLine.slice(0, sep) : titleLine,
+      author: sep > 0 ? titleLine.slice(sep + 3) : "",
+      rating: Number(m[1]),
+      date: m[2],
+      isbn,
+      liked: cleanBody(buffers.liked),
+      disliked: cleanBody(buffers.disliked),
+      notes: cleanBody(buffers.notes),
+    };
+  });
+}
+
+// Every text-style property any template touches: used as the restyle field
+// mask so properties a new template doesn't set are CLEARED, removing the
+// previous template's colors/fonts.
+const FULL_TEXT_FIELDS =
+  "bold,italic,smallCaps,fontSize,foregroundColor,weightedFontFamily";
+
+/**
+ * Restyles every existing entry in the doc to the given template. Formatting
+ * only — never inserts, deletes, or edits text (Docs version history is the
+ * undo). Returns the number of entries restyled.
+ */
+export async function restyleDoc(
+  accessToken: string,
+  docId: string,
+  style: StyleId,
+): Promise<number> {
+  const def = STYLE_DEFS[style] ?? STYLE_DEFS.classic;
+  const res = await fetch(
+    `https://docs.googleapis.com/v1/documents/${docId}?fields=body(content(startIndex,endIndex,paragraph(elements(textRun(content)))))`,
+    { headers: authHeaders(accessToken) },
+  );
+  if (res.status === 404) throw new DocNotFoundError();
+  if (!res.ok) throw new Error(`Doc read failed: ${res.status}`);
+  const body = (await res.json()) as {
+    body?: {
+      content?: {
+        startIndex?: number;
+        endIndex?: number;
+        paragraph?: { elements?: { textRun?: { content?: string } }[] };
+      }[];
+    };
+  };
+  const paras: { start: number; end: number; text: string }[] = [];
+  let docEnd = 1;
+  for (const el of body.body?.content ?? []) {
+    if (typeof el.endIndex === "number") docEnd = el.endIndex;
+    if (!el.paragraph || typeof el.endIndex !== "number") continue;
+    let text = "";
+    for (const pe of el.paragraph.elements ?? [])
+      text += pe.textRun?.content ?? "";
+    paras.push({ start: el.startIndex ?? 0, end: el.endIndex, text });
+  }
+
+  const anchors: { titleP: number; metaP: number }[] = [];
+  for (let i = 0; i < paras.length; i++) {
+    if (!META_LINE_RE.test(paras[i].text.trim())) continue;
+    let j = i - 1;
+    while (j >= 0 && !paras[j].text.trim()) j--;
+    if (j >= 0) anchors.push({ titleP: j, metaP: i });
+  }
+  if (anchors.length === 0) return 0;
+
+  const para = (start: number, end: number, namedStyleType: string) => ({
+    updateParagraphStyle: {
+      range: { startIndex: start, endIndex: end },
+      paragraphStyle: { namedStyleType },
+      fields: "namedStyleType",
+    },
+  });
+  const text = (
+    start: number,
+    end: number,
+    textStyle: TextStyle,
+    fields: string,
+  ) => ({
+    updateTextStyle: {
+      range: { startIndex: start, endIndex: end },
+      textStyle,
+      fields,
+    },
+  });
+
+  const requests: unknown[] = [];
+  anchors.forEach((a, n) => {
+    const titleP = paras[a.titleP];
+    const metaP = paras[a.metaP];
+    const regionEnd = anchors[n + 1]
+      ? paras[anchors[n + 1].titleP].start
+      : docEnd;
+    // The doc's final newline can't be text-styled.
+    const styleEnd = Math.min(regionEnd, docEnd - 1);
+
+    requests.push(para(titleP.start, titleP.end, def.titlePara));
+    if (regionEnd > titleP.end) {
+      requests.push(para(titleP.end, regionEnd, "NORMAL_TEXT"));
+    }
+    // Whole-entry font pass: sets the template's block font or clears one.
+    requests.push(
+      text(titleP.start, styleEnd, def.block ?? {}, "weightedFontFamily"),
+    );
+    requests.push(
+      text(titleP.start, titleP.end - 1, def.title ?? {}, FULL_TEXT_FIELDS),
+    );
+    requests.push(text(metaP.start, metaP.end - 1, def.meta, FULL_TEXT_FIELDS));
+    for (let i = a.metaP + 1; i < paras.length; i++) {
+      if (paras[i].start >= regionEnd) break;
+      if (LABEL_TO_FIELD[paras[i].text.trim()]) {
+        requests.push(
+          text(paras[i].start, paras[i].end - 1, def.label, FULL_TEXT_FIELDS),
+        );
+      }
+    }
+  });
+
+  const CHUNK = 400;
+  for (let i = 0; i < requests.length; i += CHUNK) {
+    const r = await fetch(
+      `https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`,
+      {
+        method: "POST",
+        headers: authHeaders(accessToken),
+        body: JSON.stringify({ requests: requests.slice(i, i + CHUNK) }),
+      },
+    );
+    if (r.status === 404) throw new DocNotFoundError();
+    if (!r.ok) throw new Error(`Restyle failed: ${r.status} ${await r.text()}`);
+  }
+  return anchors.length;
 }
 
 /** Full plain text of the doc (for the AI-recommendations export). */

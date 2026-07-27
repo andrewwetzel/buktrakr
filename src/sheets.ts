@@ -86,11 +86,24 @@ export async function createSheet(
   return body.spreadsheetId;
 }
 
-export async function appendRow(
+/** The column subset a row carries (Entry and FullEntry both satisfy it). */
+export interface RowInput {
+  date: string;
+  title: string;
+  author: string;
+  rating: number;
+  isbn: string;
+  liked: string;
+  disliked: string;
+  notes: string;
+}
+
+export async function appendRows(
   accessToken: string,
   sheetId: string,
-  entry: Entry,
+  entries: RowInput[],
 ): Promise<void> {
+  if (entries.length === 0) return;
   // RAW keeps user text literal — "=SUM(...)" in a review must never be
   // interpreted as a formula.
   const res = await fetch(
@@ -99,18 +112,16 @@ export async function appendRow(
       method: "POST",
       headers: authHeaders(accessToken),
       body: JSON.stringify({
-        values: [
-          [
-            entry.date,
-            entry.title,
-            entry.author,
-            entry.rating,
-            entry.isbn,
-            entry.liked,
-            entry.disliked,
-            entry.notes,
-          ],
-        ],
+        values: entries.map((e) => [
+          e.date,
+          e.title,
+          e.author,
+          e.rating,
+          e.isbn,
+          e.liked,
+          e.disliked,
+          e.notes,
+        ]),
       }),
     },
   );
@@ -118,6 +129,12 @@ export async function appendRow(
   if (!res.ok)
     throw new Error(`Sheet append failed: ${res.status} ${await res.text()}`);
 }
+
+export const appendRow = (
+  accessToken: string,
+  sheetId: string,
+  entry: Entry,
+): Promise<void> => appendRows(accessToken, sheetId, [entry]);
 
 export interface SheetRow extends ParsedEntry {
   isbn: string;
