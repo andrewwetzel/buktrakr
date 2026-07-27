@@ -1120,60 +1120,103 @@
         /\b(series|trilogy|saga|sequence|novels|tetralogy|pentalogy|hexalogy|heptalogy|franchise)\b/i;
 
       async function searchSeries(q, signal) {
-        const fetchWd = async (search) => {
-          const params = new URLSearchParams({
+        const wd = async (params) => {
+          const res = await fetch(
+            `https://www.wikidata.org/w/api.php?${new URLSearchParams({
+              format: "json",
+              origin: "*",
+              ...params,
+            })}`,
+            { signal },
+          );
+          if (!res.ok) throw new Error(String(res.status));
+          return res.json();
+        };
+
+        // Prefix search: best when the user is typing the series name from
+        // its start ("dark tower" → The Dark Tower).
+        const prefix = (search) =>
+          wd({
             action: "wbsearchentities",
             search,
             language: "en",
             uselang: "en",
             type: "item",
             limit: "20",
-            format: "json",
-            origin: "*",
-          });
-          const res = await fetch(
-            `https://www.wikidata.org/w/api.php?${params}`,
-            { signal },
-          );
-          if (!res.ok) throw new Error(String(res.status));
-          return (await res.json()).search || [];
-        };
-        // Prefix search is narrow, so cast two nets: the raw query, and the
-        // query with "series" appended (surfaces items the raw prefix
-        // misses). Merge and dedupe by entity id.
-        const [a, b] = await Promise.all([
-          fetchWd(q),
-          fetchWd(`${q} series`).catch(() => []),
+          })
+            .then((d) => d.search || [])
+            .catch(() => []);
+
+        // Full-text search restricted to items that ARE a book series /
+        // novel series / trilogy — matches the query anywhere in the name
+        // ("dark" → His Dark Materials), which prefix search can't do.
+        const SERIES_CLASSES = "P31=Q277759|P31=Q1667921|P31=Q53815";
+        const fulltext = wd({
+          action: "query",
+          list: "search",
+          srsearch: `${q} haswbstatement:${SERIES_CLASSES}`,
+          srlimit: "10",
+        })
+          .then(async (d) => {
+            const ids = (d.query?.search || [])
+              .map((r) => r.title)
+              .filter((t) => /^Q\d+$/.test(t));
+            if (!ids.length) return [];
+            const ents = await wd({
+              action: "wbgetentities",
+              ids: ids.join("|"),
+              props: "labels|descriptions",
+              languages: "en",
+            });
+            return ids
+              .map((id) => {
+                const e = ents.entities?.[id];
+                const label = e?.labels?.en?.value;
+                return label
+                  ? {
+                      id,
+                      label,
+                      description: e.descriptions?.en?.value || "book series",
+                    }
+                  : null;
+              })
+              .filter(Boolean);
+          })
+          .catch(() => []);
+
+        const [a, b, ft] = await Promise.all([
+          prefix(q),
+          prefix(`${q} series`),
+          fulltext,
         ]);
+        const prefixHits = [...a, ...b].filter(
+          (s) =>
+            s.label &&
+            (SERIESY.test(s.description || "") || /\bseries\b/i.test(s.label)),
+        );
         const seen = new Set();
         const merged = [];
-        for (const s of [...a, ...b]) {
-          if (!s.label || seen.has(s.id)) continue;
+        for (const s of [...prefixHits, ...ft]) {
+          if (seen.has(s.id)) continue;
           seen.add(s.id);
           merged.push(s);
         }
-        return merged
-          .filter(
-            (s) =>
-              SERIESY.test(s.description || "") || /\bseries\b/i.test(s.label),
-          )
-          .slice(0, 8)
-          .map((s) => ({
-            primary: s.label,
-            meta: s.description || "",
-            pick: () => {
-              $("title").value = s.label.replace(
-                /\s*\((?:book |novel )?series\)\s*$/i,
-                "",
-              );
-              const by = (s.description || "").match(/\bby (.+)$/i);
-              if (by && !$("author").value.trim()) {
-                $("author").value = by[1].trim();
-              }
-              if ($("author").value.trim()) $("rating").focus();
-              else $("author").focus();
-            },
-          }));
+        return merged.slice(0, 8).map((s) => ({
+          primary: s.label,
+          meta: s.description || "",
+          pick: () => {
+            $("title").value = s.label.replace(
+              /\s*\((?:book |novel )?series\)\s*$/i,
+              "",
+            );
+            const by = (s.description || "").match(/\bby (.+)$/i);
+            if (by && !$("author").value.trim()) {
+              $("author").value = by[1].trim();
+            }
+            if ($("author").value.trim()) $("rating").focus();
+            else $("author").focus();
+          },
+        }));
       }
 
       // -- Authors: Open Library's dedicated author search --
